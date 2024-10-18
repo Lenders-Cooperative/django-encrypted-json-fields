@@ -14,7 +14,7 @@ from django.utils import timezone
 from django.utils.functional import cached_property
 from django.utils.text import capfirst
 
-from .helpers import decrypt_bytes, decrypt_values, encrypt_str, encrypt_values, is_encrypted
+from .encryption import EncryptionMethod, FernetEncryption, AESEncryption
 
 
 def fetch_raw_field_value(model_instance, fieldname):
@@ -55,8 +55,11 @@ def fetch_raw_field_value(model_instance, fieldname):
 
 class EncryptedMixin(object):
     def __init__(self, crypter=None, *args, **kwargs):
-        self.crypter = crypter
-
+        if crypter is None:
+            # Provide a default crypter instance if none is provided
+            self.crypter = FernetEncryption()
+        else:
+            self.crypter = crypter
         super().__init__(*args, **kwargs)
 
     def to_python(self, value):
@@ -64,19 +67,15 @@ class EncryptedMixin(object):
             return value
 
         if isinstance(value, (bytes, str)):
-            # if isinstance(value, bytes):
-            #     value = value.decode('utf-8')
-            # try:
-            #     value = decrypt_bytes(value)
-            if is_encrypted(value):
-                crypter = self.crypter
-                if callable(crypter):
-                    crypter = crypter()
+            crypter = self.crypter
+            if callable(crypter):
+                crypter = crypter()
 
+            if crypter.is_encrypted(value):
                 try:
-                    value = decrypt_bytes(value.encode("utf-8"), crypter=crypter)
-                except cryptography.fernet.InvalidToken:
-                    pass
+                    value = crypter.decrypt_bytes(value)
+                except Exception:
+                    pass  # Handle decryption failure gracefully
 
         return super(EncryptedMixin, self).to_python(value)
 
@@ -87,27 +86,22 @@ class EncryptedMixin(object):
         value = super().get_db_prep_save(value, connection)
         if value is None:
             return value
-        # decode the encrypted value to a unicode string, else this breaks in pgsql
-        # return (encrypt_str(str(value))).decode('utf-8')
         value = str(value)
 
         crypter = self.crypter
         if callable(crypter):
             crypter = crypter()
 
-        return encrypt_str(value, crypter=crypter).decode("utf-8")
+        return crypter.encrypt_str(value)
 
     def get_internal_type(self):
         return "TextField"
 
     def deconstruct(self):
         name, path, args, kwargs = super(EncryptedMixin, self).deconstruct()
-
         if "max_length" in kwargs:
             del kwargs["max_length"]
-
         kwargs["crypter"] = self.crypter
-
         return name, path, args, kwargs
 
 
@@ -140,6 +134,11 @@ class EncryptedEmailField(EncryptedMixin, django.db.models.EmailField):
 
 
 class EncryptedBooleanField(EncryptedMixin, django.db.models.BooleanField):
+    def __init__(self, crypter=None, *args, **kwargs):
+        self.skip_keys = kwargs.pop("skip_keys", [])
+        self.crypter = crypter or FernetEncryption()
+        super().__init__(*args, **kwargs)
+
     def get_db_prep_save(self, value, connection):
         if value is None:
             return value
@@ -152,8 +151,7 @@ class EncryptedBooleanField(EncryptedMixin, django.db.models.BooleanField):
         if callable(crypter):
             crypter = crypter()
 
-        # decode the encrypted value to a unicode string, else this breaks in pgsql
-        return encrypt_str(str(value), crypter=crypter).decode("utf-8")
+        return crypter.encrypt_str(str(value))
 
 
 class EncryptedNumberMixin(EncryptedMixin):
@@ -199,62 +197,44 @@ class EncryptedBigIntegerField(EncryptedNumberMixin, django.db.models.BigInteger
 #################################################################################
 # Encryption for JSONField
 
-
 class EncryptedJSONField(django.db.models.JSONField):
     def __init__(self, crypter=None, *args, **kwargs):
         self.skip_keys = kwargs.pop("skip_keys", [])
-        self.crypter = crypter
+        self.crypter = crypter or FernetEncryption()
         super().__init__(*args, **kwargs)
 
     def deconstruct(self):
         name, path, args, kwargs = super().deconstruct()
-
         kwargs["crypter"] = self.crypter
-
         return name, path, args, kwargs
 
     def get_db_prep_save(self, value, connection):
         """
-        Return field's value prepared for saving into a database.
-
-        Here, we encrypt all the values in the object, while keeping intact
-        the keys of any dictionary inside the object, if any.
-        More precisely, well'encrypt the repr() of the values to preserve the type;
-        see encrypt_values().
+        Encrypt all the values in the JSON object before saving to the database.
         """
-
         crypter = self.crypter
         if callable(crypter):
             crypter = crypter()
 
-        value = encrypt_values(value, crypter=crypter, encoder=self.encoder)
-        # The encrypted result is itself a valid JSON-serializable object,
-        # so we pass it to our base class for proper serialization
+        value = crypter.encrypt_values(value, encoder=self.encoder)
         return super().get_db_prep_save(value, connection)
 
     def from_db_value(self, value, expression, connection):
         """
-        Adapted from django.db.models.JSONField to descrypt the values
+        Decrypt all the values in the JSON object after loading from the database.
         """
         from django.db.models.fields.json import KeyTransform
 
         if value is None:
             return value
-        # Some backends (SQLite at least) extract non-string values in their
-        # SQL datatypes.
         if isinstance(expression, KeyTransform) and not isinstance(value, str):
             return value
         try:
-            # return json.loads(value, cls=self.decoder)
-            # Deserialize the JSON,
-            # then decrypt the values of the resulting object
             obj = json.loads(value, cls=self.decoder)
-
             crypter = self.crypter
             if callable(crypter):
                 crypter = crypter()
-
-            return decrypt_values(obj, crypter=crypter, decoder=self.decoder)
+            return crypter.decrypt_values(obj)
         except json.JSONDecodeError:
             return value
 
