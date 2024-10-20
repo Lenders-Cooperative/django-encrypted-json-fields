@@ -56,7 +56,7 @@ def fetch_raw_field_value(model_instance, fieldname):
 class EncryptedMixin(object):
     def __init__(self, crypter=None, *args, **kwargs):
         if crypter is None:
-            # Provide a default crypter instance if none is provided
+            # Provide a default crypter instance if none is provided, e.g., Fernet
             self.crypter = FernetEncryption()
         else:
             self.crypter = crypter
@@ -66,11 +66,14 @@ class EncryptedMixin(object):
         if value is None:
             return value
 
+        # Decryption logic with prefix handling
         if isinstance(value, (bytes, str)):
+            # Use the decrypt method from EncryptionMethod to handle prefix checking
             crypter = self.crypter
             if callable(crypter):
                 crypter = crypter()
 
+            # Prefix will be checked here, routing decryption to the right crypter
             if crypter.is_encrypted(value):
                 try:
                     value = crypter.decrypt_bytes(value)
@@ -88,10 +91,12 @@ class EncryptedMixin(object):
             return value
         value = str(value)
 
+        # Use the provided crypter for encryption without additional checks
         crypter = self.crypter
         if callable(crypter):
             crypter = crypter()
 
+        # Encrypt the value using the provided crypter (e.g., SecurityKey.get_crypter)
         return crypter.encrypt_str(value)
 
     def get_internal_type(self):
@@ -200,6 +205,7 @@ class EncryptedBigIntegerField(EncryptedNumberMixin, django.db.models.BigInteger
 class EncryptedJSONField(django.db.models.JSONField):
     def __init__(self, crypter=None, *args, **kwargs):
         self.skip_keys = kwargs.pop("skip_keys", [])
+        # Same as in the other fields, default to Fernet if no crypter is provided
         self.crypter = crypter or FernetEncryption()
         super().__init__(*args, **kwargs)
 
@@ -216,6 +222,7 @@ class EncryptedJSONField(django.db.models.JSONField):
         if callable(crypter):
             crypter = crypter()
 
+        # Encrypt all values in the JSON object before saving
         value = crypter.encrypt_values(value, encoder=self.encoder)
         return super().get_db_prep_save(value, connection)
 
@@ -234,6 +241,8 @@ class EncryptedJSONField(django.db.models.JSONField):
             crypter = self.crypter
             if callable(crypter):
                 crypter = crypter()
+
+            # Decrypt the values in the JSON object
             return crypter.decrypt_values(obj)
         except json.JSONDecodeError:
             return value

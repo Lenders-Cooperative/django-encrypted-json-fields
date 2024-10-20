@@ -33,3 +33,6 @@ build
 
 # pyenv
 .python-version
+
+# pycharm
+.idea

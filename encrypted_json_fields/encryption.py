@@ -1,8 +1,6 @@
 from abc import ABC, abstractmethod
 import json
 from cryptography.fernet import Fernet, MultiFernet, InvalidToken
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad, unpad
 from typing import Union
 import base64
 from django.conf import settings
@@ -24,7 +22,8 @@ class MultiAES:
         """ Encrypt with the latest key """
         key = self.keys[-1]  # Use the latest key
         iv = os.urandom(16)
-        cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+        cipher = Cipher(algorithms.AES(key), modes.CBC(iv),
+                        backend=default_backend())
         encryptor = cipher.encryptor()
 
         # Padding for block size
@@ -72,37 +71,35 @@ class MultiAES:
 
 
 class EncryptionMethod(ABC):
-    def __init__(self, encoder=None, decoder=None, force=False):
-        self.keys = self.get_crypter_keys()
+    _encryption_registry = {}
+
+    def __init__(self, keys=None, encoder=None, decoder=None, force=False):
+        self.keys = keys or self.get_crypter_keys()  # Default to loading keys if not provided
         self.encoder = encoder or json.JSONEncoder()
         self.decoder = decoder or json.JSONDecoder()
         self.force = force
-        self.crypter = self.build_crypter()
-        self.encryption_disabled = force or getattr(
-            settings,
-            "EJF_DISABLE_ENCRYPTION",
-            False
-        )
+        self.encryption_disabled = force or getattr(settings,
+                                                    "EJF_DISABLE_ENCRYPTION",
+                                                    False)
 
-    def build_crypter(self):
+    @classmethod
+    def register_encryption_method(cls, prefix: bytes, encryption_class: type):
         """
-        Build a crypter for the configured keys (as specified in projects's settings)
+        Registers an encryption class with a specific prefix.
         """
-        raise NotImplementedError("build_crypter method not implemented")
+        cls._encryption_registry[prefix] = encryption_class
 
     def get_crypter_keys(self):
-        """
-        Retrieve the configured keys for the crypter
-        """
         configured_keys = getattr(settings, "EJF_ENCRYPTION_KEYS", None)
         if callable(configured_keys):
             configured_keys = configured_keys()
 
         if not configured_keys:
-            raise ImproperlyConfigured("EJF_ENCRYPTION_KEYS must be defined in settings")
+            raise ImproperlyConfigured(
+                "EJF_ENCRYPTION_KEYS must be defined in settings")
 
         if not isinstance(configured_keys, (list, tuple)):
-            configured_keys = [configured_keys]  
+            configured_keys = [configured_keys]
 
         return configured_keys
 
@@ -114,18 +111,47 @@ class EncryptionMethod(ABC):
         raise NotImplementedError("encrypt method not implemented")
 
     @abstractmethod
-    def decrypt(self, data: bytes) -> bytes:
+    def _decrypt_internal(self, data: bytes) -> bytes:
         """
-        Decrypt the given data
+        internal method to decrypt the data
         """
-        raise NotImplementedError("decrypt method not implemented")
+        raise NotImplementedError("_decrypt_internal method not implemented")
 
     @abstractmethod
-    def is_encrypted(self, s: Union[str, bytes]) -> bool:
+    def _is_encrypted_internal(self, data: bytes) -> bool:
         """
-        Check if the given string (or bytes) is the result of an encryption
+        internal method to check if the data is encrypted
         """
-        raise NotImplementedError("is_encrypted method not implemented")
+        raise NotImplementedError(
+            "_is_encrypted_internal method not implemented")
+
+    def decrypt(self, data: bytes) -> bytes:
+        """
+        Decrypt the given data based on the prefix by dispatching to the registered encryption class.
+        """
+        for prefix, encryption_class in self._encryption_registry.items():
+            if data.startswith(prefix):
+                crypter = encryption_class(self.keys)
+                return crypter._decrypt_internal(data[len(prefix):])
+
+        # Assume legacy Fernet encryption (no prefix)
+        fernet_encryption = FernetEncryption(self.keys)
+        return fernet_encryption._decrypt_internal(data)
+
+    def is_encrypted(self, data: Union[str, bytes]) -> bool:
+        """
+        Determines if the given data is encrypted by dispatching to the correct encryption class.
+        """
+        if isinstance(data, str):
+            data = data.encode("utf-8")
+
+        for prefix, encryption_class in self._encryption_registry.items():
+            if data.startswith(prefix):
+                crypter = encryption_class(self.keys)
+                return crypter._is_encrypted_internal(data[len(prefix):])
+
+        fernet_encryption = FernetEncryption(self.keys)
+        return fernet_encryption._is_encrypted_internal(data)
 
     def encrypt_str(self, s: str) -> str:
         """
@@ -135,29 +161,21 @@ class EncryptionMethod(ABC):
         if self.encryption_disabled or self.is_encrypted(encoded_string):
             return encoded_string
 
-        if self.crypter is None:
-            self.crypter = self.get_default_crypter()
-
         return self.encrypt(encoded_string).decode("utf-8")
 
     def decrypt_bytes(self, s: str) -> str:
         """
         Decrypt the given string
         """
-        assert type(s) in [
-            bytes,
-        ]
+        assert type(s) in [bytes]
 
         if self.encryption_disabled:
             return s.decode("utf-8")
 
         try:
-            return self.crypter.decrypt(s).decode("utf-8")
+            return self.decrypt(s).decode("utf-8")
         except Exception:
-            try:
-                return s.decode("utf-8")
-            except Exception:
-                return str(s)
+            return str(s)
 
     def encrypt_values(self, data, json_skip_keys=None, encoder=None):
         """
@@ -166,19 +184,12 @@ class EncryptionMethod(ABC):
         if self.encryption_disabled:
             return data
 
-        # Scan the lists, then decode each item recursively
         if isinstance(data, (list, tuple, set)):
             return [self.encrypt_values(x) for x in data]
 
-        # Scan the dicts, then decode each item recursively
         if isinstance(data, dict):
-            return {key: self.encrypt_values(value) for key, value in data.items()}
-
-        # We finally have a simple item to work with, which can be:
-        # a string, a number, a boolean, or null.
-        # Since we don't want lo lose the item's type, we apply repr()
-        # to obtain a printable representational string of it,
-        # before proceeding with the encryption
+            return {key: self.encrypt_values(value) for key, value in
+                    data.items()}
 
         if encoder is None:
             encoder_obj = json.JSONEncoder()
@@ -191,27 +202,25 @@ class EncryptionMethod(ABC):
             encoded_data = encoder_obj.encode(data)
 
         encrypted_data = self.encrypt_str(encoded_data)
-
-        # Return the result as string, so that it can be JSON-serialized later
         return encrypted_data.decode("utf-8")
 
     def decrypt_values(self, data):
         if self.encryption_disabled:
             return data
 
-        # Scan the lists, then decode each item recursively
         if isinstance(data, (list, tuple, set)):
             return [self.decrypt_values(x) for x in data]
 
         if isinstance(data, dict):
-            return {key: self.decrypt_values(value) for key, value in data.items()}
+            return {key: self.decrypt_values(value) for key, value in
+                    data.items()}
 
         try:
             if not isinstance(data, str):
                 return data
 
             if not self.is_encrypted(data):
-                return data 
+                return data
 
             data = self.decrypt_bytes(data.encode("utf-8"))
 
@@ -223,46 +232,52 @@ class EncryptionMethod(ABC):
             value = str(data)
 
         return value
-    
+
 
 class FernetEncryption(EncryptionMethod):
     def __init__(self, keys):
+        super().__init__(keys)
         self.crypter = MultiFernet([Fernet(key) for key in keys])
 
     def encrypt(self, data: bytes) -> bytes:
-        return self.crypter.encrypt(data)
+        return b"Fernet:" + self.crypter.encrypt(data)
 
-    def decrypt(self, data: bytes) -> bytes:
+    def _decrypt_internal(self, data: bytes) -> bytes:
         return self.crypter.decrypt(data)
 
-    def is_encrypted(self, data: bytes) -> bool:
-        result = True
+    def _is_encrypted_internal(self, data: bytes) -> bool:
         try:
             token = data.encode("utf-8") if isinstance(data, str) else data
-            timestamp, data = self.crypter._get_unverified_token_data(token)
+            self.crypter._get_unverified_token_data(token)
+            return True
         except InvalidToken:
-            result = False
-
-        return result
+            return False
 
 
 class AESEncryption(EncryptionMethod):
     def __init__(self, keys):
+        super().__init__(keys)
         self.crypter = MultiAES(keys)
 
     def encrypt(self, data: bytes) -> bytes:
-        return self.crypter.encrypt(data)
+        return b"AES:" + self.crypter.encrypt(data)
 
-    def decrypt(self, data: bytes) -> bytes:
+    def _decrypt_internal(self, data: bytes) -> bytes:
         return self.crypter.decrypt(data)
 
-    def is_encrypted(self, data: bytes) -> bool:
+    def _is_encrypted_internal(self, data: bytes) -> bool:
         try:
             raw = base64.b64decode(data)
-            if len(raw) < AES.block_size:
+            if len(raw) < 16:  # AES block size is 16 bytes
                 return False
-            cipher = AES.new(self.crypter.keys[-1], AES.MODE_CBC, iv=raw[:AES.block_size])
-            cipher.decrypt(raw[AES.block_size:])
+            iv = raw[:16]
+            cipher_text_only = raw[16:-32]
+            cipher = Cipher(algorithms.AES(self.crypter.keys[-1]), modes.CBC(iv), backend=default_backend())
+            decryptor = cipher.decryptor()
+            decryptor.update(cipher_text_only) + decryptor.finalize()  # Ensure we can fully decrypt
             return True
-        except (ValueError, KeyError):
+        except (ValueError, KeyError, InvalidToken):
             return False
+
+EncryptionMethod.register_encryption_method(b"AES:", AESEncryption)
+EncryptionMethod.register_encryption_method(b"Fernet:", FernetEncryption)
