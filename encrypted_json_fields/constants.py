@@ -1,0 +1,3 @@
+
+AES_PREFIX = b"AES:"
+FERNET_PREFIX = b"Fernet:"

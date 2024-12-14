@@ -55,30 +55,28 @@ def fetch_raw_field_value(model_instance, fieldname):
 
 class EncryptedMixin(object):
     def __init__(self, crypter=None, *args, **kwargs):
-        if crypter is None:
-            # Provide a default crypter instance if none is provided, e.g., Fernet
-            self.crypter = FernetEncryption()
-        else:
-            self.crypter = crypter
+        self._crypter = crypter  # Store the crypter or defer its initialization
         super().__init__(*args, **kwargs)
+
+    @property
+    def crypter(self):
+        if not self._crypter:
+            raise ValueError(
+                "Crypter must be set before encryption or decryption.")
+        if callable(self._crypter):
+            return self._crypter()
+        return self._crypter
+
 
     def to_python(self, value):
         if value is None:
             return value
 
-        # Decryption logic with prefix handling
-        if isinstance(value, (bytes, str)):
-            # Use the decrypt method from EncryptionMethod to handle prefix checking
-            crypter = self.crypter
-            if callable(crypter):
-                crypter = crypter()
-
-            # Prefix will be checked here, routing decryption to the right crypter
-            if crypter.is_encrypted(value):
-                try:
-                    value = crypter.decrypt_bytes(value)
-                except Exception:
-                    pass  # Handle decryption failure gracefully
+        if isinstance(value, (bytes, str)) and self.crypter.is_encrypted(value):
+            try:
+                value = self.crypter.decrypt_bytes(value)
+            except Exception:
+                pass
 
         return super(EncryptedMixin, self).to_python(value)
 
@@ -91,22 +89,17 @@ class EncryptedMixin(object):
             return value
         value = str(value)
 
-        # Use the provided crypter for encryption without additional checks
-        crypter = self.crypter
-        if callable(crypter):
-            crypter = crypter()
-
-        # Encrypt the value using the provided crypter (e.g., SecurityKey.get_crypter)
-        return crypter.encrypt_str(value)
+        return self.crypter.encrypt_str(value)
 
     def get_internal_type(self):
         return "TextField"
 
     def deconstruct(self):
-        name, path, args, kwargs = super(EncryptedMixin, self).deconstruct()
-        if "max_length" in kwargs:
-            del kwargs["max_length"]
-        kwargs["crypter"] = self.crypter
+        """
+        Ensure crypter is excluded during migrations to prevent serialization issues.
+        """
+        name, path, args, kwargs = super().deconstruct()
+        kwargs.pop("crypter", None)  # Remove the crypter reference for migration safety
         return name, path, args, kwargs
 
 
@@ -139,10 +132,6 @@ class EncryptedEmailField(EncryptedMixin, django.db.models.EmailField):
 
 
 class EncryptedBooleanField(EncryptedMixin, django.db.models.BooleanField):
-    def __init__(self, crypter=None, *args, **kwargs):
-        self.skip_keys = kwargs.pop("skip_keys", [])
-        self.crypter = crypter or FernetEncryption()
-        super().__init__(*args, **kwargs)
 
     def get_db_prep_save(self, value, connection):
         if value is None:
@@ -202,17 +191,11 @@ class EncryptedBigIntegerField(EncryptedNumberMixin, django.db.models.BigInteger
 #################################################################################
 # Encryption for JSONField
 
-class EncryptedJSONField(django.db.models.JSONField):
+class EncryptedJSONField(EncryptedMixin, django.db.models.JSONField):
     def __init__(self, crypter=None, *args, **kwargs):
         self.skip_keys = kwargs.pop("skip_keys", [])
-        # Same as in the other fields, default to Fernet if no crypter is provided
-        self.crypter = crypter or FernetEncryption()
         super().__init__(*args, **kwargs)
 
-    def deconstruct(self):
-        name, path, args, kwargs = super().deconstruct()
-        kwargs["crypter"] = self.crypter
-        return name, path, args, kwargs
 
     def get_db_prep_save(self, value, connection):
         """
