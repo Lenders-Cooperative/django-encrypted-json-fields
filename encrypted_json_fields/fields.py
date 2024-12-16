@@ -2,13 +2,14 @@ import hashlib
 import itertools
 import json
 import string
+import datetime
 
 import cryptography.fernet
 import django.db
 import django.db.models
 from django.conf import settings
 from django.core import validators
-from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.db import connection, models
 from django.utils import timezone
 from django.utils.functional import cached_property
@@ -67,16 +68,20 @@ class EncryptedMixin(object):
             return self._crypter()
         return self._crypter
 
+    @property
+    def encryption_enabled(self):
+        return not (self.crypter.encryption_disabled if self.crypter else True)
+
 
     def to_python(self, value):
         if value is None:
             return value
-
         if isinstance(value, (bytes, str)) and self.crypter.is_encrypted(value):
+
             try:
-                value = self.crypter.decrypt_bytes(value)
-            except Exception:
-                pass
+                value = self.crypter.decrypt_str(value)
+            except Exception as excp:
+                print(str(excp))
 
         return super(EncryptedMixin, self).to_python(value)
 
@@ -84,10 +89,14 @@ class EncryptedMixin(object):
         return self.to_python(value)
 
     def get_db_prep_save(self, value, connection):
-        value = super().get_db_prep_save(value, connection)
         if value is None:
             return value
-        value = str(value)
+
+        value_type = type(value).__name__
+        if value_type in ('datetime', 'date'):
+            value = value.isoformat()
+        else:
+            value = str(value)
 
         return self.crypter.encrypt_str(value)
 
@@ -102,9 +111,24 @@ class EncryptedMixin(object):
         kwargs.pop("crypter", None)  # Remove the crypter reference for migration safety
         return name, path, args, kwargs
 
+    def validate_max_length(self, value):
+        if value is not None and hasattr(self,
+                                         'max_length') and self.max_length:
+            encrypted_value = self.crypter.encrypt_str(str(value))
+            if len(encrypted_value) > self.max_length:
+                raise ValidationError(
+                    f'Encrypted value would exceed max_length of {self.max_length}'
+                )
+
 
 class EncryptedCharField(EncryptedMixin, django.db.models.CharField):
-    pass
+
+    def clean(self, value, model_instance):
+        value = super().clean(value, model_instance)
+        if value is not None and len(value) > self.max_length:
+            raise ValidationError(
+                f'Value too long (max length is {self.max_length})')
+        return value
 
 
 class EncryptedTextField(EncryptedMixin, django.db.models.TextField):
@@ -112,7 +136,19 @@ class EncryptedTextField(EncryptedMixin, django.db.models.TextField):
 
 
 class EncryptedDateField(EncryptedMixin, django.db.models.DateField):
-    pass
+    def pre_save(self, model_instance, add):
+        if self.auto_now or (add and self.auto_now_add):
+            from django.utils import timezone
+            value = timezone.now().date()
+            setattr(model_instance, self.attname, value)
+            return value
+        return super().pre_save(model_instance, add)
+
+    def get_db_prep_value(self, value, connection, prepared=False):
+        if self.auto_now or (not prepared and self.auto_now_add):
+            from django.utils import timezone
+            value = timezone.now().date()
+        return super().get_db_prep_value(value, connection, prepared)
 
 
 class EncryptedDateTimeField(EncryptedMixin, django.db.models.DateTimeField):
@@ -132,24 +168,43 @@ class EncryptedEmailField(EncryptedMixin, django.db.models.EmailField):
 
 
 class EncryptedBooleanField(EncryptedMixin, django.db.models.BooleanField):
-
     def get_db_prep_save(self, value, connection):
         if value is None:
             return value
-        if value is True:
-            value = "1"
-        elif value is False:
-            value = "0"
+        value = "1" if value else "0"
+        return self.crypter.encrypt_str(value)
 
-        crypter = self.crypter
-        if callable(crypter):
-            crypter = crypter()
-
-        return crypter.encrypt_str(str(value))
+    def from_db_value(self, value, *args, **kwargs):
+        if value is None:
+            return value
+        try:
+            decrypted_value = self.crypter.decrypt_str(value)
+            return decrypted_value == "1"
+        except Exception:
+            return None
 
 
 class EncryptedNumberMixin(EncryptedMixin):
     max_length = 20
+
+    def get_db_prep_save(self, value, connection):
+        if value is not None:
+            try:
+                value = self.to_python(value)  # Convert to Python number
+                self.check_value(value)  # Use check_value instead of validate
+            except (TypeError, ValueError) as e:
+                raise ValidationError(f"Invalid number format: {e}")
+            except ValidationError:
+                raise
+        # After validation passes, encrypt and save
+        return super().get_db_prep_save(value, connection)
+
+    def check_value(self, value):
+        """
+        Validate the value without requiring a model instance.
+        This is used for database-level validation.
+        """
+        return value
 
     @cached_property
     def validators(self):
@@ -169,23 +224,43 @@ class EncryptedIntegerField(EncryptedNumberMixin, django.db.models.IntegerField)
     description = (
         "An IntegerField that is encrypted before " "inserting into a database using the python cryptography " "library"
     )
-    pass
+    def check_value(self, value):
+        if value is not None:
+            min_value, max_value = -2147483648, 2147483647
+            if not (min_value <= value <= max_value):
+                raise ValidationError(f"Value must be between {min_value} and {max_value}")
+        super().check_value(value)
 
-
-class EncryptedPositiveIntegerField(EncryptedNumberMixin, django.db.models.PositiveIntegerField):
-    pass
+class EncryptedPositiveIntegerField(EncryptedIntegerField, django.db.models.PositiveIntegerField):
+    def check_value(self, value):
+        if value is not None and value < 0:
+            raise ValidationError("Positive integer field cannot be negative.")
+        super().check_value(value)
 
 
 class EncryptedSmallIntegerField(EncryptedNumberMixin, django.db.models.SmallIntegerField):
-    pass
+    def check_value(self, value):
+        if value is not None:
+            min_value, max_value = -32768, 32767
+            if not (min_value <= value <= max_value):
+                raise ValidationError(f"Value must be between {min_value} and {max_value}")
+        super().check_value(value)
 
 
-class EncryptedPositiveSmallIntegerField(EncryptedNumberMixin, django.db.models.PositiveSmallIntegerField):
-    pass
+class EncryptedPositiveSmallIntegerField(EncryptedSmallIntegerField, django.db.models.PositiveSmallIntegerField):
+    def check_value(self, value):
+        if value is not None and value < 0:
+            raise ValidationError("Positive integer field cannot be negative.")
+        super().check_value(value)
 
 
 class EncryptedBigIntegerField(EncryptedNumberMixin, django.db.models.BigIntegerField):
-    pass
+    def check_value(self, value):
+        if value is not None:
+            min_value, max_value = -9223372036854775808, 9223372036854775807
+            if not (min_value <= value <= max_value):
+                raise ValidationError(f"Value must be between {min_value} and {max_value}")
+        super().check_value(value)
 
 
 #################################################################################
@@ -194,41 +269,67 @@ class EncryptedBigIntegerField(EncryptedNumberMixin, django.db.models.BigInteger
 class EncryptedJSONField(EncryptedMixin, django.db.models.JSONField):
     def __init__(self, crypter=None, *args, **kwargs):
         self.skip_keys = kwargs.pop("skip_keys", [])
-        super().__init__(*args, **kwargs)
+        if not isinstance(self.skip_keys, (list, tuple)):
+            raise ValueError("skip_keys must be a list or tuple")
+        super().__init__(crypter=crypter, *args, **kwargs)
 
+    def get_internal_type(self):
+        return "JSONField"
 
     def get_db_prep_save(self, value, connection):
         """
         Encrypt all the values in the JSON object before saving to the database.
         """
+        if value is None:
+            return value
+
         crypter = self.crypter
         if callable(crypter):
             crypter = crypter()
 
-        # Encrypt all values in the JSON object before saving
-        value = crypter.encrypt_values(value, encoder=self.encoder)
-        return super().get_db_prep_save(value, connection)
+        # Use the crypter's encrypt_values method
+        encrypted_value = crypter.encrypt_values(
+            value,
+            json_skip_keys=self.skip_keys,
+            encoder=self.encoder
+        )
+
+        # Call JSONField's get_db_prep_save directly to avoid EncryptedMixin
+        return super(django.db.models.JSONField, self).get_db_prep_save(
+            encrypted_value, connection)
 
     def from_db_value(self, value, expression, connection):
         """
         Decrypt all the values in the JSON object after loading from the database.
         """
-        from django.db.models.fields.json import KeyTransform
-
         if value is None:
             return value
-        if isinstance(expression, KeyTransform) and not isinstance(value, str):
-            return value
-        try:
-            obj = json.loads(value, cls=self.decoder)
-            crypter = self.crypter
-            if callable(crypter):
-                crypter = crypter()
 
-            # Decrypt the values in the JSON object
-            return crypter.decrypt_values(obj)
-        except json.JSONDecodeError:
-            return value
+        # Let JSONField handle the JSON deserialization
+        value = django.db.models.JSONField.from_db_value(self, value,
+                                                         expression,
+                                                         connection)
+
+        crypter = self.crypter
+        if callable(crypter):
+            crypter = crypter()
+
+        return crypter.decrypt_values(value)
+
+    def to_python(self, value):
+        """
+        Override to prevent EncryptedMixin's decryption
+        """
+        return super(django.db.models.JSONField, self).to_python(value)
+
+    def validate_max_length(self, value):
+        """
+        Disable max_length validation as it doesn't apply to JSON fields
+        """
+        pass
+
+
+
 
 
 SEARCH_HASH_PREFIX = "xZZx"
@@ -323,10 +424,23 @@ class EncryptedSearchField(models.CharField):
         3. Saving model instances
         Having different defaults on the SearchField and Encrypted field, eg only setting
         default on one of them, leads to some unexpected and strange behaviour.
+
+    Limitations:
+    - Only supports exact matches
+    - Case-insensitive comparisons
+    - No partial matches or wildcards
+    - Must maintain same salt value across all instances
     """
 
     description = "A secure SearchField to accompany an EncryptedField"
     descriptor_class = EncryptedSearchFieldDescriptor
+
+    def db_type(self, connection):
+        """
+        Ensures the field is created as a TextField in the database
+        to accommodate the hash length
+        """
+        return 'text'
 
     def __init__(self, salt=None, encrypted_field_name=None, *args, **kwargs):
         if salt is None:
@@ -339,12 +453,14 @@ class EncryptedSearchField(models.CharField):
                 "You must supply the name of the accompanying Encrypted Field that will hold the data"
             )
         if not isinstance(encrypted_field_name, str):
-            raise ImproperlyConfigured("'encrypted_field_name' must be a string")
+            raise ImproperlyConfigured(
+                "'encrypted_field_name' must be a string")
 
         self.encrypted_field_name = encrypted_field_name
 
         if kwargs.get("primary_key"):
-            raise ImproperlyConfigured("SearchField does not support primary_key=True.")
+            raise ImproperlyConfigured(
+                "SearchField does not support primary_key=True.")
 
         if "default" in kwargs:
             # We always use EncryptedField's default.
@@ -352,9 +468,12 @@ class EncryptedSearchField(models.CharField):
                 f"SearchField does not support 'default='. Set 'default=' on '{self.encrypted_field_name}' instead"
             )
 
-        kwargs["max_length"] = 64 + len(SEARCH_HASH_PREFIX)  # will be sha256 hex digest
-        kwargs["null"] = True  # should be nullable, in case data field is nullable.
-        kwargs["blank"] = True  # to be consistent with 'null'. Forms are not based on SearchField anyway.
+        kwargs["max_length"] = 64 + len(
+            SEARCH_HASH_PREFIX)  # will be sha256 hex digest
+        kwargs[
+            "null"] = True  # should be nullable, in case data field is nullable.
+        kwargs[
+            "blank"] = True  # to be consistent with 'null'. Forms are not based on SearchField anyway.
         super().__init__(*args, **kwargs)
 
     def deconstruct(self):
@@ -374,11 +493,24 @@ class EncryptedSearchField(models.CharField):
 
     def has_default(self):
         """Always use the EncryptedFields default"""
-        return self.model._meta.get_field(self.encrypted_field_name).has_default()
+        return self.model._meta.get_field(
+            self.encrypted_field_name).has_default()
 
     def get_default(self):
         """Always use EncryptedField's default."""
-        return self.model._meta.get_field(self.encrypted_field_name).get_default()
+        return self.model._meta.get_field(
+            self.encrypted_field_name).get_default()
+
+    def get_prep_lookup(self, lookup_type, value):
+        """
+        Only allow exact lookups since we're searching hashed values.
+        """
+        if lookup_type != 'exact':
+            raise TypeError(
+                f"EncryptedSearchField only supports 'exact' lookups, not '{lookup_type}'. "
+                f"Partial matches, case-insensitive searches, etc. are not possible with hashed values."
+            )
+        return self.get_prep_value(value)
 
     def get_prep_value(self, value):
         if value is None:
@@ -388,18 +520,24 @@ class EncryptedSearchField(models.CharField):
         # NOTE: not sure what happens when the str format for date/datetime is changed??
         # Should not matter as we are dealing with a datetime object in this case.
         # Eg str(datetime(10, 9, 2020))
-        value = str(value)
 
         if is_hashed_already(value):
             # if we have hashed this previously, don't do it again
             return value
+
+        # If it's a string, lower case it so search isn't case-sensitive
+        if isinstance(value, str):
+            value = value.lower()
+        else:
+            value = str(value)
 
         salt = self.salt
         if callable(salt):
             salt = salt()
 
         salted_value = value + salt
-        return SEARCH_HASH_PREFIX + hashlib.sha256(salted_value.encode()).hexdigest()
+        return SEARCH_HASH_PREFIX + hashlib.sha256(
+            salted_value.encode()).hexdigest()
 
     def clean(self, value, model_instance):
         """
@@ -413,7 +551,8 @@ class EncryptedSearchField(models.CharField):
             # This will happen when calling manage.py createuser/createsuperuser
             return value
 
-        return model_instance._meta.get_field(self.encrypted_field_name).clean(value, model_instance)
+        return model_instance._meta.get_field(self.encrypted_field_name).clean(
+            value, model_instance)
 
     def formfield(self, **kwargs):
         """
@@ -428,4 +567,5 @@ class EncryptedSearchField(models.CharField):
 
         encfield_kwargs.pop("widget", None)
 
-        return self.model._meta.get_field(self.encrypted_field_name).formfield(**encfield_kwargs)
+        return self.model._meta.get_field(self.encrypted_field_name).formfield(
+            **encfield_kwargs)

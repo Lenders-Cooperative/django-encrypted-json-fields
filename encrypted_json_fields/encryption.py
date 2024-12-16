@@ -5,7 +5,6 @@ from typing import Union
 import base64
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
-
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, hmac
@@ -15,79 +14,52 @@ from ast import literal_eval
 from .utils import pad, unpad
 from .constants import AES_PREFIX, FERNET_PREFIX
 
-
 class MultiAES:
-    """
-    MultiAES provides AES-256 encryption and decryption with support for multiple keys.
-    All keys must be 32 bytes long.
-    """
     def __init__(self, keys):
-        """Initialize with multiple keys"""
         for key in keys:
-            if len(key) != 32:  # AES-256 requires 32-byte keys
+            if len(key) != 32:
                 raise ValueError("Invalid AES key length: must be 32 bytes.")
         self.keys = keys
 
     def encrypt(self, plaintext: bytes) -> bytes:
-        """Encrypt the plaintext using AES-CBC with PKCS#7 padding and HMAC for authentication."""
-        key = self.keys[-1]  # Use the latest key
+        key = self.keys[-1]
         if len(key) != 32:
-            raise ValueError(
-                "AES key must be 32 bytes for AES-256 encryption.")
-
-        block_size = 16  # AES block size
-        iv = os.urandom(block_size)  # Generate a random IV
+            raise ValueError("AES key must be 32 bytes.")
+        block_size = 16
+        iv = os.urandom(block_size)
         cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
         encryptor = cipher.encryptor()
 
-        # Add PKCS#7 padding to the plaintext
         padded_data = pad(plaintext, block_size)
-
-        # Encrypt the padded data
         ciphertext = encryptor.update(padded_data) + encryptor.finalize()
 
-        # Create an HMAC for IV + ciphertext
         h = hmac.HMAC(key, hashes.SHA256())
         h.update(iv + ciphertext)
         hmac_tag = h.finalize()
 
-        # Return IV + ciphertext + HMAC tag
         return iv + ciphertext + hmac_tag
 
     def decrypt(self, ciphertext: bytes) -> bytes:
-        """Try to decrypt the ciphertext using any available key."""
-        block_size = 16  # AES block size
-
+        block_size = 16
         for key in self.keys:
             try:
                 if len(key) != 32:
-                    raise ValueError(
-                        "AES key must be 32 bytes for AES-256 decryption.")
-
-                # Extract components
+                    raise ValueError("AES key must be 32 bytes.")
                 iv = ciphertext[:block_size]
                 cipher_text_only = ciphertext[block_size:-32]
                 hmac_tag = ciphertext[-32:]
 
-                # Verify HMAC
                 h = hmac.HMAC(key, hashes.SHA256())
                 h.update(iv + cipher_text_only)
                 h.verify(hmac_tag)
 
-                # If HMAC is valid, decrypt the ciphertext
                 cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
                 decryptor = cipher.decryptor()
-                padded_data = decryptor.update(
-                    cipher_text_only) + decryptor.finalize()
-
-                # Remove PKCS#7 padding
+                padded_data = decryptor.update(cipher_text_only) + decryptor.finalize()
                 return unpad(padded_data, block_size)
-            except (InvalidSignature, ValueError) as e:
+            except (InvalidSignature, ValueError):
                 continue
-
-        # If all keys fail
         raise ValueError("Decryption failed with all keys")
-
 
 class EncryptionMethod(ABC):
     _encryption_registry = {}
@@ -103,147 +75,137 @@ class EncryptionMethod(ABC):
 
     @classmethod
     def register_encryption_method(cls, prefix: bytes, encryption_class: type):
-        """
-        Registers an encryption class with a specific prefix.
-        """
         cls._encryption_registry[prefix] = encryption_class
 
     @abstractmethod
-    def encrypt(self, data: bytes) -> bytes:
-        """
-        Encrypt the given data.
-        """
-        raise NotImplementedError("encrypt method not implemented")
+    def _encrypt_raw(self, data: bytes) -> bytes:
+        raise NotImplementedError("_encrypt_raw method not implemented")
 
     @abstractmethod
     def _decrypt_internal(self, data: bytes) -> bytes:
-        """
-        Internal method to decrypt the data.
-        """
         raise NotImplementedError("_decrypt_internal method not implemented")
 
     @abstractmethod
     def _is_encrypted_internal(self, data: bytes) -> bool:
-        """
-        Internal method to check if the data is encrypted.
-        """
         raise NotImplementedError("_is_encrypted_internal method not implemented")
 
+    @property
+    @abstractmethod
+    def prefix(self) -> bytes:
+        raise NotImplementedError("prefix property not implemented")
+
     def _is_legacy_data(self, data: bytes) -> bool:
+        # No prefix => legacy Fernet token
+        fernet_encryption = FernetEncryption(self.keys)
+        return fernet_encryption._is_encrypted_internal(data)
+
+    def encrypt(self, data: bytes) -> bytes:
+        if self.encryption_disabled:
+            return data
+        # Each subclass will handle final encoding/prefix steps differently
+        return self._final_encrypt(data)
+
+    @abstractmethod
+    def _final_encrypt(self, data: bytes) -> bytes:
         """
-        Determines if the given data qualifies as legacy (non-prefixed) encrypted data.
-        Legacy data is assumed to be valid Fernet data without a prefix.
+        Finalize encryption:
+        - Fernet: prefix + token (no re-encode)
+        - AES: prefix + urlsafe_b64encode(raw)
         """
-        try:
-            fernet_encryption = FernetEncryption(self.keys)
-            return fernet_encryption._is_encrypted_internal(data)
-        except Exception as excp:
-            return False
+        raise NotImplementedError("_final_encrypt method not implemented")
 
     def decrypt(self, data: bytes) -> bytes:
-        """
-        Decrypt the given data based on the prefix by dispatching to the registered encryption class.
-        For legacy data without a prefix, defaults to Fernet decryption.
-        Raises a ValueError for invalid prefixes.
-        """
         if self.encryption_disabled:
             return data
 
-        # Check for a valid prefix
-        for prefix, encryption_class in self._encryption_registry.items():
+        for prefix, enc_class in self._encryption_registry.items():
             if data.startswith(prefix):
-                crypter = encryption_class(self.keys)
-                return crypter._decrypt_internal(data)
+                # Found prefix, use that crypter only
+                crypter = enc_class(self.keys)
+                without_prefix = data[len(prefix):]
+                if prefix == FERNET_PREFIX:
+                    # Fernet token directly
+                    return crypter._decrypt_internal(without_prefix)
+                else:
+                    # AES: urlsafe_b64decode
+                    raw_encrypted = base64.urlsafe_b64decode(without_prefix)
+                    return crypter._decrypt_internal(raw_encrypted)
 
-        # Check if the data is legacy (no prefix)
+        # No prefix => legacy Fernet
         if self._is_legacy_data(data):
             fernet_encryption = FernetEncryption(self.keys)
-            return fernet_encryption._decrypt_internal(data)
+            return fernet_encryption._decrypt_legacy(data)
 
-        # Raise an error for unrecognized prefixes
         raise ValueError("Invalid prefix for encrypted data")
 
+    def _decrypt_legacy(self, data: bytes) -> bytes:
+        fernet_encryption = FernetEncryption(self.keys)
+        return fernet_encryption._decrypt_legacy(data)
+
     def is_encrypted(self, data: Union[str, bytes]) -> bool:
-        """
-        Determines if the given data is encrypted by dispatching to the correct encryption class.
-        Handles prefixed data, legacy (non-prefixed) data, and invalid prefixes.
-        """
         if isinstance(data, str):
             data = data.encode("utf-8")
-        # Check for a valid prefix
-        for prefix, encryption_class in self._encryption_registry.items():
+
+
+        for prefix, enc_class in self._encryption_registry.items():
             if data.startswith(prefix):
-                crypter = encryption_class(self.keys)
-                return crypter._is_encrypted_internal(data[len(prefix):])
+                crypter = enc_class(self.keys)
+                without_prefix = data[len(prefix):]
+                if prefix == FERNET_PREFIX:
+                    # Fernet token directly
+                    return crypter._is_encrypted_internal(without_prefix)
+                else:
+                    # AES: urlsafe_b64decode and check
+                    try:
+                        raw_encrypted = base64.urlsafe_b64decode(without_prefix)
+                        return crypter._is_encrypted_internal(raw_encrypted)
+                    except Exception:
+                        return False
 
-        # Check if the data qualifies as legacy (non-prefixed) Fernet data
-        if self._is_legacy_data(data):
-            return True
-
-        # No valid prefix and not legacy data
-        return False
+        # No prefix => legacy Fernet
+        return self._is_legacy_data(data)
 
     def encrypt_str(self, s: str) -> str:
-        """Encrypt the given string."""
         if self.encryption_disabled or self.is_encrypted(s.encode("utf-8")):
             return s
-        return self.encrypt(s.encode("utf-8")).decode("utf-8")
+        encrypted = self.encrypt(s.encode("utf-8"))
+        return encrypted.decode("utf-8")
 
-    def decrypt_bytes(self, s: bytes) -> str:
-        """
-        Decrypt the given bytes data and return a string.
-        """
-        assert isinstance(s, bytes), "Input to decrypt_bytes must be bytes."
-
+    def decrypt_str(self, value: str) -> str:
         if self.encryption_disabled:
-            return s.decode("utf-8")
+            return value
 
-        try:
-            return self.decrypt(s).decode("utf-8")
-        except Exception:
-            return str(s)
+        decrypted = self.decrypt(value.encode("utf-8"))
+        return decrypted.decode("utf-8")
 
     def encrypt_values(self, data, json_skip_keys=None, encoder=None):
-        """
-        Recursively encrypt values in lists, tuples, sets, or dictionaries.
-        """
         if self.encryption_disabled:
             return data
 
         if json_skip_keys is None:
             json_skip_keys = []
 
-        # Handle lists, tuples, and sets recursively
         if isinstance(data, (list, tuple, set)):
-            return [self.encrypt_values(x, json_skip_keys=json_skip_keys, encoder=encoder) for x in data]
+            return [self.encrypt_values(x, json_skip_keys=json_skip_keys,
+                                        encoder=encoder) for x in data]
 
-        # Handle dictionaries recursively
         if isinstance(data, dict):
             return {
-                key: value if key in json_skip_keys
-                else self.encrypt_values(value, json_skip_keys=json_skip_keys,
-                                         encoder=encoder)
+                key: value if key in json_skip_keys else self.encrypt_values(
+                    value, json_skip_keys=json_skip_keys, encoder=encoder)
                 for key, value in data.items()
             }
 
-        # Determine the encoder
-        if encoder is None:
-            encoder_obj = json.JSONEncoder()
-        else:
-            encoder_obj = encoder()
-
-        # Handle primitive data types
         if isinstance(data, (int, float, bool, str)):
             try:
-                # Represent the data as a string before encrypting
                 encoded_data = repr(data)
                 return self.encrypt_str(encoded_data)
             except Exception as e:
                 raise ValueError(
                     f"Failed to encrypt value: {data} (Error: {str(e)})")
 
-        # Handle non-primitive serializable data
         try:
+            encoder_obj = encoder() if encoder else json.JSONEncoder()
             encoded_data = encoder_obj.encode(data)
             return self.encrypt_str(encoded_data)
         except Exception as e:
@@ -251,47 +213,32 @@ class EncryptionMethod(ABC):
                 f"Failed to encode and encrypt value: {data} (Error: {str(e)})")
 
     def decrypt_values(self, data):
-        """
-        Recursively decrypt values in lists, tuples, sets, or dictionaries.
-        """
         if self.encryption_disabled:
             return data
 
-        # Handle lists, tuples, and sets recursively
         if isinstance(data, (list, tuple, set)):
             return [self.decrypt_values(x) for x in data]
 
-        # Handle dictionaries recursively
         if isinstance(data, dict):
-            return {key: self.decrypt_values(value) for key, value in
-                    data.items()}
+            return {key: self.decrypt_values(value) for key, value in data.items()}
 
-        # Handle primitive values
+        if not isinstance(data, str):
+            return data
+
+        if not self.is_encrypted(data):
+            return data
+
+        decrypted_data = self.decrypt_str(data)
+
         try:
-            if not isinstance(data, str):
-                return data
-
-            # Check if the data is encrypted
-            if not self.is_encrypted(data):
-                return data
-
-            # Decrypt the data
-            decrypted_data = self.decrypt_bytes(data.encode("utf-8"))
-
-            # Attempt to parse the decrypted data
-            try:
-                # Try to convert back to original type
-                return literal_eval(decrypted_data)
-            except (ValueError, SyntaxError):
-                # Fall back to JSON decoding
-                return self.decoder.decode(decrypted_data)
-        except Exception as e:
-            # Provide clear error message
-            raise ValueError(
-                f"Failed to decrypt value: {data} (Error: {str(e)})")
+            return literal_eval(decrypted_data)
+        except (ValueError, SyntaxError):
+            return self.decoder.decode(decrypted_data)
 
 
 class FernetEncryption(EncryptionMethod):
+    prefix = FERNET_PREFIX
+
     def __init__(self, keys):
         super().__init__(keys)
         try:
@@ -299,69 +246,59 @@ class FernetEncryption(EncryptionMethod):
         except Exception as e:
             raise ValueError(f"Invalid Fernet key: {e}")
 
-    def encrypt(self, data: bytes) -> bytes:
-        """Encrypt data using Fernet and add the Fernet prefix."""
-        if self.encryption_disabled:
-            return data
-        return FERNET_PREFIX + self.crypter.encrypt(data)
+    def _encrypt_raw(self, data: bytes) -> bytes:
+        # Returns Fernet token directly (URL-safe base64)
+        return self.crypter.encrypt(data)
 
     def _decrypt_internal(self, data: bytes) -> bytes:
-        """
-        Decrypt Fernet-encrypted data.
-        Handle both prefixed and legacy data without a prefix.
-        """
-        if data.startswith(FERNET_PREFIX):
-            data = data[len(FERNET_PREFIX):]
+        # data is Fernet token directly
         return self.crypter.decrypt(data)
 
-
     def _is_encrypted_internal(self, data: bytes) -> bool:
-        """
-        Check if the given data is encrypted using Fernet.
-        Considers both prefixed and legacy (non-prefixed) data.
-        """
+        try:
+            self.crypter.decrypt(data, ttl=None)
+            return True
+        except InvalidToken:
+            return False
 
-        if data.startswith(FERNET_PREFIX):
-            data = data[len(FERNET_PREFIX):]
+    def _decrypt_legacy(self, data: bytes) -> bytes:
+        # legacy Fernet
+        return self.crypter.decrypt(data)
 
-        for fernet in self.crypter._fernets:
-            try:
-                decrypted_data = fernet.decrypt(data, ttl=None)  # Actual decryption attempt
-                return True
-            except InvalidToken:
-                continue  # Try the next key
-        return False
-
+    def _final_encrypt(self, data: bytes) -> bytes:
+        # For Fernet: _encrypt_raw returns token, just prefix + token
+        raw_encrypted = self._encrypt_raw(data)
+        # No extra encoding needed
+        return self.prefix + raw_encrypted
 
 
 class AESEncryption(EncryptionMethod):
+    prefix = AES_PREFIX
+
     def __init__(self, keys):
         super().__init__(keys)
         self.crypter = MultiAES(keys)
 
-    def encrypt(self, data: bytes) -> bytes:
-        """Encrypt data using AES and add the AES prefix."""
-        if self.encryption_disabled:
-            return data
-        return AES_PREFIX + self.crypter.encrypt(data)
+    def _encrypt_raw(self, data: bytes) -> bytes:
+        # AES: raw binary
+        return self.crypter.encrypt(data)
 
     def _decrypt_internal(self, data: bytes) -> bytes:
-        """Decrypt AES-encrypted data."""
-        if not data.startswith(AES_PREFIX):
-            raise ValueError("Invalid prefix for AES-encrypted data")
-        return self.crypter.decrypt(data[len(AES_PREFIX):])
+        # data is raw binary after decode
+        return self.crypter.decrypt(data)
 
     def _is_encrypted_internal(self, data: bytes) -> bool:
-        """
-        Check if the given data is encrypted using AES.
-        """
         try:
-            if not data.startswith(AES_PREFIX):
-                return False
-            data = data[len(AES_PREFIX):]
-            return len(data) >= 48  # IV (16) + HMAC (32)
+            self.crypter.decrypt(data)
+            return True
         except Exception:
             return False
+
+    def _final_encrypt(self, data: bytes) -> bytes:
+        # For AES: raw_encrypted is binary, urlsafe_b64encode then prefix
+        raw_encrypted = self._encrypt_raw(data)
+        encoded = base64.urlsafe_b64encode(raw_encrypted)
+        return self.prefix + encoded
 
 
 EncryptionMethod.register_encryption_method(AES_PREFIX, AESEncryption)
