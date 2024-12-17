@@ -128,7 +128,6 @@ class EncryptedFieldsTests(EncryptedFieldsBaseTestCase, TestCase):
                 [model.pk]
             )
             raw_value = cursor.fetchone()[0]
-            print(f"Raw encrypted value: {raw_value}")
             self.assertTrue(self.crypter.is_encrypted(raw_value))
 
         # Now test auto_now behavior across different dates
@@ -137,16 +136,13 @@ class EncryptedFieldsTests(EncryptedFieldsBaseTestCase, TestCase):
         with patch('django.utils.timezone.now') as mock_now:
             # Set initial date
             mock_now.return_value = initial_datetime
-            print(f"Mocked initial datetime: {mock_now()}")
 
             model = self.create_test_model()
             original_date = model.enc_date_now_field
-            print(f"Original date saved: {original_date}")
 
             # Change to next day
             next_day_datetime = initial_datetime + timedelta(days=1)
             mock_now.return_value = next_day_datetime
-            print(f"Mocked next day datetime: {mock_now()}")
 
             # Force field update to trigger save
             model.enc_char_field = "new value next day"
@@ -154,7 +150,6 @@ class EncryptedFieldsTests(EncryptedFieldsBaseTestCase, TestCase):
 
             # Get a fresh instance from the database
             fresh_model = TestModel.objects.get(pk=model.pk)
-            print(f"Date from fresh model: {fresh_model.enc_date_now_field}")
 
             self.assertNotEqual(fresh_model.enc_date_now_field, original_date)
             self.assertEqual(fresh_model.enc_date_now_field,
@@ -167,7 +162,6 @@ class EncryptedFieldsTests(EncryptedFieldsBaseTestCase, TestCase):
                     [fresh_model.pk]
                 )
                 raw_value = cursor.fetchone()[0]
-                print(f"Raw encrypted value for auto_now field: {raw_value}")
                 self.assertTrue(self.crypter.is_encrypted(raw_value))
 
     def test_encrypted_datetime_field(self):
