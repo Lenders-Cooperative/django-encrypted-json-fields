@@ -1,6 +1,6 @@
 import os
 import base64
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet, MultiFernet, InvalidToken
 from django.core.exceptions import ImproperlyConfigured
 from django.test import TestCase
 from encrypted_json_fields.encryption import (
@@ -13,10 +13,11 @@ from encrypted_json_fields.encryption import (
 
 class EncryptionTests(TestCase):
     def setUp(self):
-        self.keys = [Fernet.generate_key()]  # Valid Fernet keys
-        self.aes_keys = [os.urandom(32)]     # Valid AES keys
+        self.fernet_keys = [Fernet.generate_key()]  # Valid Fernet keys
+        self.aes_keys = [os.urandom(32)]
+        self.keys = {"aes":self.aes_keys, "fernet": self.fernet_keys}
         self.fernet_encryption = FernetEncryption(self.keys)
-        self.aes_encryption = AESEncryption(self.aes_keys)
+        self.aes_encryption = AESEncryption(self.keys)
 
     def test_encrypt_decrypt_fernet(self):
         data = b"test data"
@@ -33,7 +34,7 @@ class EncryptionTests(TestCase):
     def test_decryption_with_invalid_key_fails(self):
         data = b"test data"
         encrypted = self.fernet_encryption.encrypt(data)
-        self.fernet_encryption.keys = [Fernet.generate_key()]  # Replace keys
+        self.fernet_encryption.keys = {"aes": self.aes_keys, "fernet": [Fernet.generate_key()]}
         with self.assertRaises(InvalidToken) as context:
             self.fernet_encryption.decrypt(encrypted)
         self.assertIsInstance(context.exception, InvalidToken)
@@ -41,9 +42,11 @@ class EncryptionTests(TestCase):
     def test_decryption_with_invalid_key_fails_aes(self):
         data = b"test data"
         encrypted = self.aes_encryption.encrypt(data)
-        self.aes_encryption.keys = [os.urandom(32)]  # Replace keys
+        self.aes_encryption.keys = {"aes": [os.urandom(32)],
+                                       "fernet": self.fernet_keys}
         with self.assertRaises(ValueError):
             self.aes_encryption.decrypt(encrypted)
+
 
     def test_encryption_disabled_does_not_encrypt_fernet(self):
         self.fernet_encryption.encryption_disabled = True
@@ -59,9 +62,10 @@ class EncryptionTests(TestCase):
         self.assertEqual(encrypted, data)
 
     def test_aes_invalid_key_length(self):
-        invalid_keys = [os.urandom(16)]  # Use 16 bytes instead of 32
+        invalid_aes_keys = [os.urandom(16)]  # Use 16 bytes instead of 32
+        keys = {"aes": invalid_aes_keys, "fernet": self.fernet_keys}
         with self.assertRaises(ValueError):
-            AESEncryption(invalid_keys)
+            AESEncryption(keys)
 
     def test_is_encrypted_internal_fernet(self):
         data = b"test data"
@@ -71,7 +75,7 @@ class EncryptionTests(TestCase):
         self.assertTrue(self.fernet_encryption.is_encrypted(encrypted_prefixed))
 
         # Test with legacy data: raw Fernet encryption without prefix
-        raw_fernet = Fernet(self.keys[0])
+        raw_fernet = Fernet(self.fernet_keys[0])
         encrypted_legacy = raw_fernet.encrypt(data)  # legacy fernet token
         # Should also be recognized as encrypted
         self.assertTrue(self.fernet_encryption.is_encrypted(encrypted_legacy))
@@ -105,7 +109,7 @@ class EncryptionTests(TestCase):
                          "Invalid prefix for encrypted data")
 
     def test_legacy_fernet_decryption(self):
-        raw_fernet = Fernet(self.keys[0])
+        raw_fernet = Fernet(self.fernet_keys[0])
         data = b"test data"
         encrypted = raw_fernet.encrypt(data)  # Legacy data (just a Fernet token)
         decrypted = self.fernet_encryption.decrypt(encrypted)

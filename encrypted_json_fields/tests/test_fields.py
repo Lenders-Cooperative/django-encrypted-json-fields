@@ -1,3 +1,4 @@
+import os
 from unittest.mock import patch
 from django.test import TestCase, TransactionTestCase
 import datetime
@@ -29,15 +30,18 @@ class EncryptedFieldsBaseTestCase:
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.test_key = Fernet.generate_key()
+        cls.keys = {
+            'fernet': [Fernet.generate_key()],
+            'aes': [os.urandom(32)]
+        }
 
     def setUp(self):
         super().setUp()
-        self.crypter = FernetEncryption(keys=[self.__class__.test_key])
+        self.crypter = FernetEncryption(keys=self.__class__.keys)
         TestModel.crypter_class = FernetEncryption
-        TestModel.crypter_keys = [self.__class__.test_key]
+        TestModel.crypter_keys = self.__class__.keys
         TestSearchableModel.crypter_class = FernetEncryption
-        TestSearchableModel.crypter_keys = [self.__class__.test_key]
+        TestSearchableModel.crypter_keys = self.__class__.keys
 
         for model in [TestModel, TestSearchableModel]:
             for field in model._meta.fields:

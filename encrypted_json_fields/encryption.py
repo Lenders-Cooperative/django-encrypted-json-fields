@@ -67,7 +67,11 @@ class EncryptionMethod(ABC):
     def __init__(self, keys, encoder=None, decoder=None, force=False):
         if not keys:
             raise ImproperlyConfigured("Encryption keys must be provided during initialization.")
+        if not isinstance(keys, dict):
+            raise ImproperlyConfigured("Keys must be provided as a dictionary.")
         self.keys = keys
+        self.aes_keys = keys.get("aes", [])
+        self.fernet_keys = keys.get("fernet", [])
         self.encoder = encoder or json.JSONEncoder()
         self.decoder = decoder or json.JSONDecoder()
         self.force = force
@@ -120,7 +124,6 @@ class EncryptionMethod(ABC):
 
         for prefix, enc_class in self._encryption_registry.items():
             if data.startswith(prefix):
-                # Found prefix, use that crypter only
                 crypter = enc_class(self.keys)
                 without_prefix = data[len(prefix):]
                 if prefix == FERNET_PREFIX:
@@ -242,7 +245,7 @@ class FernetEncryption(EncryptionMethod):
     def __init__(self, keys):
         super().__init__(keys)
         try:
-            self.crypter = MultiFernet([Fernet(key) for key in keys])
+            self.crypter = MultiFernet([Fernet(key) for key in self.fernet_keys])
         except Exception as e:
             raise ValueError(f"Invalid Fernet key: {e}")
 
@@ -253,6 +256,7 @@ class FernetEncryption(EncryptionMethod):
     def _decrypt_internal(self, data: bytes) -> bytes:
         # data is Fernet token directly
         return self.crypter.decrypt(data)
+
 
     def _is_encrypted_internal(self, data: bytes) -> bool:
         try:
@@ -277,7 +281,8 @@ class AESEncryption(EncryptionMethod):
 
     def __init__(self, keys):
         super().__init__(keys)
-        self.crypter = MultiAES(keys)
+
+        self.crypter = MultiAES(self.aes_keys)
 
     def _encrypt_raw(self, data: bytes) -> bytes:
         # AES: raw binary
