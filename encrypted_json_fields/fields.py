@@ -70,7 +70,7 @@ class EncryptedMixin(object):
 
     @property
     def encryption_enabled(self):
-        return not (self.crypter.encryption_disabled if self.crypter else True)
+        return (self.crypter.encryption_enabled if self.crypter else True)
 
 
     def to_python(self, value):

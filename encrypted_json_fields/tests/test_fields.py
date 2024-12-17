@@ -207,29 +207,34 @@ class EncryptedFieldsTests(EncryptedFieldsBaseTestCase, TestCase):
         """Test EncryptedJSONField with various JSON structures"""
         test_values = [
             {},  # Empty dict - should remain empty
-            {"string": "value"},  # Simple string value should be encrypted
+            {"string": "value1"},  # Simple string value should be encrypted
             {"number": 123},  # Numbers should be encrypted
             {"boolean": True},  # Booleans should be encrypted
             {"null": None},  # Null should remain null
-            {"nested": {"key": "value"}},  # Nested values should be encrypted
+            {"nested": {"key": "value2"}},  # Nested values should be encrypted
             {"list": [1, 2, 3]},  # List values should be encrypted
             {"complex": {
-                "string": "value",
+                "string": "value3",
                 "number": 123,
                 "boolean": True,
                 "null": None,
                 "list": [1, "2", 3.0, False],
-                "nested": {"key": "value"}
+                "nested": {"key": "value4"}
             }},
             [],  # Empty list - should remain empty
             [1, 2, 3],  # List values should be encrypted
             ["a", "b", "c"],  # List string values should be encrypted
-            [{"key": "value"}, {"key2": "value2"}]
+            [{"key": "value5"}, {"key2": "value6"}]
             # Nested dict values should be encrypted
         ]
 
         for value in test_values:
             model = self.create_test_model(enc_json_field=value)
+
+            raw_value = TestModel.objects.filter(pk=model.pk).values_list(
+                "enc_json_field", flat=True).first()
+            print(f"Raw Encrypted Value (before decryption): {raw_value}")
+
             loaded = TestModel.objects.get(pk=model.pk)
             decrypted = loaded.enc_json_field
 

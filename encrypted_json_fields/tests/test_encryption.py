@@ -49,14 +49,14 @@ class EncryptionTests(TestCase):
 
 
     def test_encryption_disabled_does_not_encrypt_fernet(self):
-        self.fernet_encryption.encryption_disabled = True
+        self.fernet_encryption.encryption_enabled = False
         data = b"test data"
         encrypted = self.fernet_encryption.encrypt(data)
         # If disabled, 'encrypt' returns original data as is
         self.assertEqual(encrypted, data)
 
     def test_encryption_disabled_does_not_encrypt_aes(self):
-        self.aes_encryption.encryption_disabled = True
+        self.aes_encryption.encryption_enabled = False
         data = b"test data"
         encrypted = self.aes_encryption.encrypt(data)
         self.assertEqual(encrypted, data)
@@ -119,7 +119,7 @@ class EncryptionTests(TestCase):
         self.assertTrue(self.fernet_encryption.is_encrypted(encrypted))
 
     def test_global_encryption_disabled(self):
-        self.fernet_encryption.encryption_disabled = True
+        self.fernet_encryption.encryption_enabled = False
         data = b"test data"
         encrypted = self.fernet_encryption.encrypt(data)
         self.assertEqual(encrypted, data)  # no encryption if disabled

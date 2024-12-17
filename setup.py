@@ -38,6 +38,7 @@ setup(
     install_requires=[
         "django >= 2.2",
         "cryptography >= 3.4",
+        "pycryptodome >= 3.9",
     ],
     classifiers=[
         'Development Status :: 5 - Production/Stable',
