@@ -22,12 +22,16 @@ class EncryptionTests(TestCase):
     def test_encrypt_decrypt_fernet(self):
         data = b"test data"
         encrypted = self.fernet_encryption.encrypt(data)  # prefix + no double Base64 needed
+        self.assertNotEqual(encrypted, data)
+        self.assertTrue(encrypted.startswith(b"Fernet:"))
         decrypted = self.fernet_encryption.decrypt(encrypted)
         self.assertEqual(decrypted, data)
 
     def test_encrypt_decrypt_aes(self):
         data = b"test data"
         encrypted = self.aes_encryption.encrypt(data)  # prefix + base64
+        self.assertNotEqual(encrypted, data)
+        self.assertTrue(encrypted.startswith(b"AES:"))
         decrypted = self.aes_encryption.decrypt(encrypted)
         self.assertEqual(decrypted, data)
 

@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import json
 from cryptography.fernet import Fernet, MultiFernet, InvalidToken
-from typing import Union
+from typing import Dict, List, Type, Union
 import base64
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
@@ -14,13 +14,28 @@ from Crypto.Util.Padding import pad, unpad
 from .constants import AES_PREFIX, FERNET_PREFIX
 
 class MultiAES:
-    def __init__(self, keys):
+    def __init__(self, keys: List[bytes]) -> None:
         for key in keys:
             if len(key) != 32:
                 raise ValueError("Invalid AES key length: must be 32 bytes.")
         self.keys = keys
 
     def encrypt(self, plaintext: bytes) -> bytes:
+        """
+        Encrypt data using AES-CBC with the most recent key and HMAC authentication.
+
+        Args:
+            plaintext (bytes): The data to encrypt.
+
+        Returns:
+            bytes: Concatenated IV + encrypted data + HMAC tag.
+                  Format: [16 bytes IV][variable length ciphertext][32 bytes HMAC]
+
+        Notes:
+            - Uses the last key in the keys list for encryption
+            - Generates a random IV for each encryption
+            - Includes HMAC-SHA256 for integrity verification
+        """
         key = self.keys[-1]
         block_size = 16
         iv = os.urandom(block_size)
@@ -37,13 +52,30 @@ class MultiAES:
         return iv + ciphertext + hmac_tag
 
     def decrypt(self, ciphertext: bytes) -> bytes:
+        """
+        Decrypt data using AES-CBC, trying all available keys until successful.
+
+        Args:
+            ciphertext (bytes): The encrypted data in format [IV][ciphertext][HMAC].
+                               Must be at least 48 bytes long (16 byte IV + 32 byte HMAC).
+
+        Returns:
+            bytes: The decrypted plaintext.
+
+        Raises:
+            ValueError: If decryption fails with all available keys or if the input is invalid.
+
+        Notes:
+            - Attempts decryption with each key until successful
+            - Verifies HMAC before attempting decryption
+            - Uses CBC mode with the IV from the ciphertext
+        """
         block_size = 16
         for key in self.keys:
             try:
                 iv = ciphertext[:block_size]
                 cipher_text_only = ciphertext[block_size:-32]
                 hmac_tag = ciphertext[-32:]
-
                 h = hmac.HMAC(key, hashes.SHA256())
                 h.update(iv + cipher_text_only)
                 h.verify(hmac_tag)
@@ -57,9 +89,36 @@ class MultiAES:
         raise ValueError("Decryption failed with all keys")
 
 class EncryptionMethod(ABC):
-    _encryption_registry = {}
+    """
+    Abstract base class for encryption methods. Provides a flexible interface
+    for handling multiple encryption schemes like AES and Fernet.
+
+    Attributes:
+        _encryption_registry (dict): A registry of encryption methods keyed by their prefixes.
+        keys (dict): A dictionary of encryption keys.
+        aes_keys (list): List of AES encryption keys.
+        fernet_keys (list): List of Fernet encryption keys.
+        encoder: JSON encoder for encoding data during encryption.
+        decoder: JSON decoder for decoding data during decryption.
+        force (bool): Whether to enforce encryption even if disabled globally.
+        encryption_enabled (bool): Whether encryption is enabled globally or forced.
+    """
+
+    _encryption_registry: Dict[bytes, Type["EncryptionMethod"]] = {}
 
     def __init__(self, keys, encoder=None, decoder=None, force=True):
+        """
+        Initializes the encryption method with the required keys and settings.
+
+        Args:
+            keys (dict): A dictionary of encryption keys (e.g., {"aes": [...], "fernet": [...]}).
+            encoder (json.JSONEncoder, optional): JSON encoder for encoding data.
+            decoder (json.JSONDecoder, optional): JSON decoder for decoding data.
+            force (bool, optional): Force encryption even if globally disabled.
+
+        Raises:
+            ImproperlyConfigured: If keys are not provided or not a dictionary.
+        """
         if not keys:
             raise ImproperlyConfigured("Encryption keys must be provided during initialization.")
         if not isinstance(keys, dict):
@@ -83,10 +142,6 @@ class EncryptionMethod(ABC):
     @abstractmethod
     def _decrypt_internal(self, data: bytes) -> bytes:
         raise NotImplementedError("_decrypt_internal method not implemented")
-
-    @abstractmethod
-    def _is_encrypted_internal(self, data: bytes) -> bool:
-        raise NotImplementedError("_is_encrypted_internal method not implemented")
 
     @property
     @abstractmethod
@@ -114,6 +169,18 @@ class EncryptionMethod(ABC):
         raise NotImplementedError("_final_encrypt method not implemented")
 
     def decrypt(self, data: bytes) -> bytes:
+        """
+        Decrypts the provided data.
+
+        Args:
+            data (bytes): The encrypted data to decrypt.
+
+        Returns:
+            bytes: The decrypted plaintext data.
+
+        Raises:
+            ValueError: If the data has an invalid prefix.
+        """
         if not self.encryption_enabled:
             return data
 
@@ -144,7 +211,6 @@ class EncryptionMethod(ABC):
         if isinstance(data, str):
             data = data.encode("utf-8")
 
-
         for prefix, enc_class in self._encryption_registry.items():
             if data.startswith(prefix):
                 return True
@@ -165,6 +231,17 @@ class EncryptionMethod(ABC):
         return decrypted.decode("utf-8")
 
     def encrypt_values(self, data, json_skip_keys=None, encoder=None):
+        """
+        Recursively encrypts values in a data structure. Used for encrypting JSONField data.
+
+        Args:
+            data (Union[dict, list, set, tuple, int, float, str, bool]): The data to encrypt.
+            json_skip_keys (list, optional): Keys to skip during encryption.
+            encoder (json.JSONEncoder, optional): JSON encoder for complex types.
+
+        Returns:
+            Union[dict, list, set, tuple, int, float, str, bool]: The encrypted data.
+        """
         if not self.encryption_enabled:
             return data
 
@@ -199,6 +276,15 @@ class EncryptionMethod(ABC):
                 f"Failed to encode and encrypt value: {data} (Error: {str(e)})")
 
     def decrypt_values(self, data):
+        """
+        Recursively decrypts values in a data structure. Used for decrypting JSONField data.
+
+        Args:
+            data (Union[dict, list, set, tuple, str]): The data to decrypt.
+
+        Returns:
+            Union[dict, list, set, tuple, str]: The decrypted data.
+        """
         if not self.encryption_enabled:
             return data
 
@@ -259,6 +345,13 @@ class EncryptionMethod(ABC):
 
 
 class FernetEncryption(EncryptionMethod):
+    """
+    Implementation of encryption using the Fernet symmetric encryption protocol.
+
+    Fernet guarantees that a message encrypted using it cannot be manipulated or
+    read without the key. It uses AES in CBC mode with a 128-bit key for encryption
+    and HMAC using SHA256 for authentication.
+    """
     prefix = FERNET_PREFIX
 
     def __init__(self, keys):
@@ -273,10 +366,34 @@ class FernetEncryption(EncryptionMethod):
         return self.crypter.encrypt(data)
 
     def _decrypt_internal(self, data: bytes) -> bytes:
-        # data is Fernet token directly
+        """
+        Decrypt a Fernet token.
+
+        Args:
+            data (bytes): Encrypted data as a Fernet token.
+
+        Returns:
+            bytes: Decrypted data.
+
+        Raises:
+            InvalidToken: If the token is invalid or has been tampered with.
+        """
         return self.crypter.decrypt(data)
 
     def _is_encrypted_internal(self, data: bytes) -> bool:
+        """
+        Check if the provided data is a valid Fernet-encrypted token.
+
+        Args:
+            data (bytes): Data to check.
+
+        Returns:
+            bool: True if the data is a valid Fernet token, False otherwise.
+
+        Notes:
+            This method attempts to decrypt the data with an infinite TTL to
+            verify if it's a valid Fernet token, regardless of age.
+        """
         try:
             self.crypter.decrypt(data, ttl=None)
             return True
@@ -284,18 +401,46 @@ class FernetEncryption(EncryptionMethod):
             return False
 
     def _final_encrypt(self, data: bytes) -> bytes:
-        # For Fernet: _encrypt_raw returns token, just prefix + token
+        """
+        Perform final encryption step by adding the encryption method prefix.
+
+        Args:
+            data (bytes): Raw data to encrypt.
+
+        Returns:
+            bytes: Prefixed encrypted data in format: prefix + Fernet token.
+
+        Notes:
+            This method adds the Fernet prefix to identify the encryption method
+            used, allowing for multiple encryption methods in the same system.
+        """
         raw_encrypted = self._encrypt_raw(data)
-        # No extra encoding needed
         return self.prefix + raw_encrypted
 
 
 class AESEncryption(EncryptionMethod):
+    """
+    Implementation of encryption using AES (Advanced Encryption Standard).
+
+    This class provides AES encryption in CBC mode with HMAC authentication.
+    The implementation includes support for multiple encryption keys and
+    uses URL-safe base64 encoding for the final encrypted output.
+    """
     prefix = AES_PREFIX
 
     def __init__(self, keys):
-        super().__init__(keys)
+        """
+        Initialize AESEncryption with encryption keys.
 
+        Args:
+            keys (dict): Dictionary containing encryption keys. Must include 'aes' key
+                        with a list of 32-byte keys for AES-256 encryption.
+
+        Raises:
+            ImproperlyConfigured: If keys dictionary is empty or malformed.
+            ValueError: If any AES key is not exactly 32 bytes long.
+        """
+        super().__init__(keys)
         self.crypter = MultiAES(self.aes_keys)
 
     def _encrypt_raw(self, data: bytes) -> bytes:
@@ -303,18 +448,24 @@ class AESEncryption(EncryptionMethod):
         return self.crypter.encrypt(data)
 
     def _decrypt_internal(self, data: bytes) -> bytes:
-        # data is raw binary after decode
         return self.crypter.decrypt(data)
 
-    def _is_encrypted_internal(self, data: bytes) -> bool:
-        try:
-            self.crypter.decrypt(data)
-            return True
-        except Exception:
-            return False
-
     def _final_encrypt(self, data: bytes) -> bytes:
-        # For AES: raw_encrypted is binary, urlsafe_b64encode then prefix
+        """
+        Perform final encryption step and prepare data for storage/transmission.
+
+        Args:
+            data (bytes): Raw data to encrypt.
+
+        Returns:
+            bytes: Prefixed and encoded encrypted data in format:
+                  prefix + base64url(IV + ciphertext + HMAC)
+
+        Notes:
+            - Encrypts the raw data using AES
+            - Encodes the result using URL-safe base64
+            - Prepends the AES prefix for identification
+        """
         raw_encrypted = self._encrypt_raw(data)
         encoded = base64.urlsafe_b64encode(raw_encrypted)
         return self.prefix + encoded
