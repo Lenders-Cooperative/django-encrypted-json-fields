@@ -50,6 +50,14 @@ _The keys should come from an env variable or a secure source._
 
 You can use **AES** or **Fernet** encryption by initializing the appropriate crypter.
 
+Add the following to your `settings.py`:
+
+```python
+EJF_SEARCH_FIELD_SALT = "your-salt-for-search-field"
+EJF_ENABLE_ENCRYPTION = True # defaults to True if not found
+```
+
+
 ---
 
 ## Usage

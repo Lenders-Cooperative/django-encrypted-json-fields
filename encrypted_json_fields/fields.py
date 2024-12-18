@@ -444,7 +444,7 @@ class EncryptedSearchField(models.CharField):
 
     def __init__(self, salt=None, encrypted_field_name=None, *args, **kwargs):
         if salt is None:
-            self.salt = getattr(settings, "SEARCH_FIELD_SALT", "")
+            self.salt = getattr(settings, "EJF_SEARCH_FIELD_SALT", "")
         else:
             self.salt = salt
 
