@@ -191,11 +191,12 @@ class EncryptionMethod(ABC):
                 return crypter._decrypt_internal(without_prefix)
 
         # No prefix => legacy Fernet
-        if self._is_legacy_data(data):
+        try:
             fernet_encryption = FernetEncryption(self.keys)
-            return fernet_encryption._decrypt_legacy(data)
-
-        raise ValueError("Invalid prefix for encrypted data")
+            return fernet_encryption._decrypt_internal(data)
+        except InvalidToken:
+            raise ValueError(
+                "Invalid prefix or data format for encrypted data")
 
     def _decrypt_legacy(self, data: bytes) -> bytes:
         fernet_encryption = FernetEncryption(self.keys)

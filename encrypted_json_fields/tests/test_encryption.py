@@ -110,7 +110,7 @@ class EncryptionTests(TestCase):
         with self.assertRaises(ValueError) as context:
             self.fernet_encryption.decrypt(invalid_data)
         self.assertEqual(str(context.exception),
-                         "Invalid prefix for encrypted data")
+                         "Invalid prefix or data format for encrypted data")
 
     def test_legacy_fernet_decryption(self):
         raw_fernet = Fernet(self.fernet_keys[0])
