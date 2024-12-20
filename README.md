@@ -55,9 +55,9 @@ There is a helper function `get_default_crypter` included to get the default cry
 Add the following to your `settings.py`:
 
 ```python
-EJF_SEARCH_FIELD_SALT = "your-salt-for-search-field"
+EJF_SEARCH_FIELD_SALT = "your-salt-for-search-field"  # should be secure, random, and consistent
 EJF_ENABLE_ENCRYPTION = True # defaults to True if not found
-EJF_DEFAULT_ENCRYPTION = "aesencryption"
+EJF_DEFAULT_ENCRYPTION = "aes" # only required for using get_default_crypter
 ```
 
 
