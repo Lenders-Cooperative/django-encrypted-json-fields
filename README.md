@@ -38,7 +38,7 @@ pip install cryptography pycryptodome
 
 ### Define Encryption Keys
 
-Add encryption keys to your `settings.py`:
+Implementation of this is left up to  you. You can define them in your settings.py, or in a more secure way.
 
 ```python
 ENCRYPTION_KEYS = {
@@ -50,11 +50,14 @@ _The keys should come from an env variable or a secure source._
 
 You can use **AES** or **Fernet** encryption by initializing the appropriate crypter.
 
+There is a helper function `get_default_crypter` included to get the default crypter from a settings variable. It should be passed the encryption keys.
+
 Add the following to your `settings.py`:
 
 ```python
 EJF_SEARCH_FIELD_SALT = "your-salt-for-search-field"
 EJF_ENABLE_ENCRYPTION = True # defaults to True if not found
+EJF_DEFAULT_ENCRYPTION = "aesencryption"
 ```
 
 

@@ -124,8 +124,6 @@ class EncryptionMethod(ABC):
         if not isinstance(keys, dict):
             raise ImproperlyConfigured("Keys must be provided as a dictionary.")
         self.keys = keys
-        self.aes_keys = keys.get("aes", [])
-        self.fernet_keys = keys.get("fernet", [])
         self.encoder = encoder or json.JSONEncoder()
         self.decoder = decoder or json.JSONDecoder()
         self.force = force
@@ -351,6 +349,7 @@ class FernetEncryption(EncryptionMethod):
 
     def __init__(self, keys):
         super().__init__(keys)
+        self.fernet_keys = keys.get("fernet", [])
         try:
             self.crypter = MultiFernet([Fernet(key) for key in self.fernet_keys])
         except Exception as e:
@@ -436,6 +435,7 @@ class AESEncryption(EncryptionMethod):
             ValueError: If any AES key is not exactly 32 bytes long.
         """
         super().__init__(keys)
+        self.aes_keys = keys.get("aes", [])
         self.crypter = MultiAES(self.aes_keys)
 
     def _encrypt_raw(self, data: bytes) -> bytes:
