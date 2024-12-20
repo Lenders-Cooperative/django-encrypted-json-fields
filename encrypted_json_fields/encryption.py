@@ -188,13 +188,7 @@ class EncryptionMethod(ABC):
             if data.startswith(prefix):
                 crypter = enc_class(self.keys)
                 without_prefix = data[len(prefix):]
-                if prefix == FERNET_PREFIX:
-                    # Fernet token directly
-                    return crypter._decrypt_internal(without_prefix)
-                else:
-                    # AES: urlsafe_b64decode
-                    raw_encrypted = base64.urlsafe_b64decode(without_prefix)
-                    return crypter._decrypt_internal(raw_encrypted)
+                return crypter._decrypt_internal(without_prefix)
 
         # No prefix => legacy Fernet
         if self._is_legacy_data(data):
@@ -448,7 +442,8 @@ class AESEncryption(EncryptionMethod):
         return self.crypter.encrypt(data)
 
     def _decrypt_internal(self, data: bytes) -> bytes:
-        return self.crypter.decrypt(data)
+        raw_encrypted = base64.urlsafe_b64decode(data)
+        return self.crypter.decrypt(raw_encrypted)
 
     def _final_encrypt(self, data: bytes) -> bytes:
         """
