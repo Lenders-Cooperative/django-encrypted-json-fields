@@ -23,7 +23,7 @@ class EncryptionTests(TestCase):
         data = b"test data"
         encrypted = self.fernet_encryption.encrypt(data)  # prefix + no double Base64 needed
         self.assertNotEqual(encrypted, data)
-        self.assertTrue(encrypted.startswith(b"Fernet:"))
+        self.assertTrue(encrypted.startswith(b"fernet:"))
         decrypted = self.fernet_encryption.decrypt(encrypted)
         self.assertEqual(decrypted, data)
 
@@ -31,7 +31,7 @@ class EncryptionTests(TestCase):
         data = b"test data"
         encrypted = self.aes_encryption.encrypt(data)  # prefix + base64
         self.assertNotEqual(encrypted, data)
-        self.assertTrue(encrypted.startswith(b"AES:"))
+        self.assertTrue(encrypted.startswith(b"aes:"))
         decrypted = self.aes_encryption.decrypt(encrypted)
         self.assertEqual(decrypted, data)
 

@@ -23,14 +23,13 @@ def get_default_crypter(keys: dict):
     if not default_encryption:
         raise ValueError("EJF_DEFAULT_ENCRYPTION setting is not defined.")
 
-    # Normalize the setting (case-insensitive, remove special characters)
-    default_encryption = default_encryption.lower().strip().replace(":", "")
+    normalized_default = default_encryption.lower().strip()
 
     # Match the setting to a registered encryption class by prefix
-    for prefix, encryption_class in EncryptionMethod._encryption_registry.items():
+    for method_type, encryption_class in EncryptionMethod._encryption_registry.items():
         # Normalize the prefix for comparison
-        normalized_prefix = prefix.decode().lower().strip().replace(":", "")
-        if normalized_prefix == default_encryption:
+
+        if method_type == normalized_default:
             return encryption_class(keys)
 
     # If no match is found, raise an error

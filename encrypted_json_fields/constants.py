@@ -1,3 +1,4 @@
 
-AES_PREFIX = b"AES:"
-FERNET_PREFIX = b"Fernet:"
+class EncryptionTypes:
+    AES = "aes"
+    FERNET = "fernet"

@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives import hashes, hmac
 from cryptography.exceptions import InvalidSignature
 import os
 from Crypto.Util.Padding import pad, unpad
-from .constants import AES_PREFIX, FERNET_PREFIX
+from .constants import EncryptionTypes
 
 class MultiAES:
     def __init__(self, keys: List[bytes]) -> None:
@@ -130,8 +130,31 @@ class EncryptionMethod(ABC):
         self.encryption_enabled = getattr(settings, "EJF_ENABLE_ENCRYPTION", True) or force
 
     @classmethod
-    def register_encryption_method(cls, prefix: bytes, encryption_class: type):
-        cls._encryption_registry[prefix] = encryption_class
+    def register_encryption_method(cls, method_type: str, encryption_class: type):
+        cls._encryption_registry[method_type] = encryption_class
+
+    @staticmethod
+    def build_prefix(method_type: str) -> bytes:
+        """
+        Single place to build the prefix from a string-based method_type.
+        For example, 'aes' -> b'aes:', 'fernet' -> b'fernet:'.
+        """
+        return f"{method_type}:".encode("utf-8")
+
+    @property
+    @abstractmethod
+    def method_type(self) -> str:
+        """
+        Must return the short string identifier for this method (e.g., 'aes').
+        """
+        raise NotImplementedError("method_type not implemented")
+
+    @property
+    def prefix(self) -> bytes:
+        """
+        Builds a byte prefix based on method_type (e.g. b'aes:', b'fernet:').
+        """
+        return self.build_prefix(self.method_type)
 
     @abstractmethod
     def _encrypt_raw(self, data: bytes) -> bytes:
@@ -141,10 +164,14 @@ class EncryptionMethod(ABC):
     def _decrypt_internal(self, data: bytes) -> bytes:
         raise NotImplementedError("_decrypt_internal method not implemented")
 
-    @property
     @abstractmethod
-    def prefix(self) -> bytes:
-        raise NotImplementedError("prefix property not implemented")
+    def _final_encrypt(self, data: bytes) -> bytes:
+        """
+        Finalize encryption:
+        - Fernet: prefix + token (no re-encode)
+        - AES: prefix + urlsafe_b64encode(raw)
+        """
+        raise NotImplementedError("_final_encrypt method not implemented")
 
     def _is_legacy_data(self, data: bytes) -> bool:
         # No prefix => legacy Fernet token
@@ -156,15 +183,6 @@ class EncryptionMethod(ABC):
             return data
         # Each subclass will handle final encoding/prefix steps differently
         return self._final_encrypt(data)
-
-    @abstractmethod
-    def _final_encrypt(self, data: bytes) -> bytes:
-        """
-        Finalize encryption:
-        - Fernet: prefix + token (no re-encode)
-        - AES: prefix + urlsafe_b64encode(raw)
-        """
-        raise NotImplementedError("_final_encrypt method not implemented")
 
     def decrypt(self, data: bytes) -> bytes:
         """
@@ -182,10 +200,11 @@ class EncryptionMethod(ABC):
         if not self.encryption_enabled:
             return data
 
-        for prefix, enc_class in self._encryption_registry.items():
-            if data.startswith(prefix):
+        for registered_type, enc_class in self._encryption_registry.items():
+            test_prefix = self.build_prefix(registered_type)
+            if data.startswith(test_prefix):
                 crypter = enc_class(self.keys)
-                without_prefix = data[len(prefix):]
+                without_prefix = data[len(test_prefix):]
                 return crypter._decrypt_internal(without_prefix)
 
         # No prefix => legacy Fernet
@@ -204,8 +223,9 @@ class EncryptionMethod(ABC):
         if isinstance(data, str):
             data = data.encode("utf-8")
 
-        for prefix, enc_class in self._encryption_registry.items():
-            if data.startswith(prefix):
+        for registered_type, enc_class in self._encryption_registry.items():
+            test_prefix = self.build_prefix(registered_type)
+            if data.startswith(test_prefix):
                 return True
         # No prefix => legacy Fernet
         return self._is_legacy_data(data)
@@ -345,7 +365,7 @@ class FernetEncryption(EncryptionMethod):
     read without the key. It uses AES in CBC mode with a 128-bit key for encryption
     and HMAC using SHA256 for authentication.
     """
-    prefix = FERNET_PREFIX
+    method_type = EncryptionTypes.FERNET
 
     def __init__(self, keys):
         super().__init__(keys)
@@ -420,7 +440,7 @@ class AESEncryption(EncryptionMethod):
     The implementation includes support for multiple encryption keys and
     uses URL-safe base64 encoding for the final encrypted output.
     """
-    prefix = AES_PREFIX
+    method_type = EncryptionTypes.AES
 
     def __init__(self, keys):
         """
@@ -467,5 +487,5 @@ class AESEncryption(EncryptionMethod):
         return self.prefix + encoded
 
 
-EncryptionMethod.register_encryption_method(AES_PREFIX, AESEncryption)
-EncryptionMethod.register_encryption_method(FERNET_PREFIX, FernetEncryption)
+EncryptionMethod.register_encryption_method(EncryptionTypes.AES, AESEncryption)
+EncryptionMethod.register_encryption_method(EncryptionTypes.FERNET, FernetEncryption)
