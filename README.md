@@ -60,8 +60,9 @@ EJF_ENABLE_ENCRYPTION = True # defaults to True if not found
 EJF_DEFAULT_ENCRYPTION = "aes" # only required for using get_default_crypter
 ```
 
-
 ---
+
+
 
 ## Usage
 
@@ -237,6 +238,57 @@ Always query using the **exact value** of the field.
 3. Ensure encryption keys are **securely stored** and **not hardcoded** in the codebase.
 
 ---
+
+## Adding a New Encryption Method Class
+
+To add a new encryption method, create a new class in the `encryption.py` file that inherits from `EncryptionMethod`.
+You can add a matching `EncryptionType` attribute in `constants.py`.
+
+```python
+# Example class for a custom encryption method
+
+class MyCustomEncryption(EncryptionMethod):
+    @property
+    def method_type(self) -> str:
+        """
+        Return a short string that identifies this new method. 
+        This value will become part of the prefix for storage/lookup.
+        """
+        return "mycustom"
+
+    def __init__(self, keys, encoder=None, decoder=None, force=True):
+        super().__init__(keys, encoder=encoder, decoder=decoder, force=force)
+        # TODO: Initialize any custom components, e.g. your custom key parsing
+        self.my_keys = keys.get("mycustom", [])
+        # Setup your internal encryption/decryption object if needed
+
+    def _encrypt_raw(self, data: bytes) -> bytes:
+        """
+        Perform the **raw** encryption without adding prefixes or performing 
+        final transformations like Base64 encoding. Must return bytes.
+        """
+        # TODO: Implement your custom encryption logic
+        # e.g., encrypt using your custom crypto library
+        ciphertext = b"..."
+        return ciphertext
+
+    def _decrypt_internal(self, data: bytes) -> bytes:
+        """
+        Decrypt the data that was originally produced by _encrypt_raw.
+        The 'data' argument has already had the prefix removed by the base class.
+        """
+        # TODO: Implement your custom decryption logic
+        plaintext = b"..."
+        return plaintext
+```
+
+### Register the new class at the bottom of the `encryption.py` file:
+
+```python
+EncryptionMethod.register_encryption_method("mycustom", MyCustomEncryption)
+```
+
+
 
 ## TODO
 
