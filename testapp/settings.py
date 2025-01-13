@@ -103,4 +103,4 @@ USE_TZ = True
 STATIC_URL = '/static/'
 
 
-EJF_DEFAULT_ENCRYPTION = "fernetencryption"
+EJF_DEFAULT_ENCRYPTION = "fernet"

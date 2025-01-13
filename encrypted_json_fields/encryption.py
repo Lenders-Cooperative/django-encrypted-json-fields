@@ -110,8 +110,16 @@ class EncryptionMethod(ABC):
         """
         Initializes the encryption method with the required keys and settings.
 
+        To handle multiple methods, keys should be a dict of lists,
+        one list for each method:
+
+        {
+            "aes": [...],
+            "fernet": [...].
+        }
+
         Args:
-            keys (dict): A dictionary of encryption keys (e.g., {"aes": [...], "fernet": [...]}).
+            keys (dict): A dictionary of encryption keys.
             encoder (json.JSONEncoder, optional): JSON encoder for encoding data.
             decoder (json.JSONDecoder, optional): JSON decoder for decoding data.
             force (bool, optional): Force encryption even if globally disabled.
