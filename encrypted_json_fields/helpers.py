@@ -40,7 +40,7 @@ def get_default_crypter(keys: dict):
     for method_type, encryption_class in EncryptionMethod._encryption_registry.items():
         # Normalize the prefix for comparison
 
-        if method_type == normalized_default:
+        if method_type == encryption_method:
             return encryption_class(keys)
 
     # If no match is found, raise an error
