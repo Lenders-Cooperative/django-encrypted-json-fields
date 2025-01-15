@@ -377,6 +377,9 @@ class FernetEncryption(EncryptionMethod):
     def __init__(self, keys):
         super().__init__(keys)
         self.fernet_keys = keys.get("fernet", [])
+        if not self.fernet_keys:
+            raise ValueError(
+                "FernetEncryption requires at least one Fernet key.")
         try:
             self.crypter = MultiFernet([Fernet(key) for key in self.fernet_keys])
         except Exception as e:
@@ -463,6 +466,9 @@ class AESEncryption(EncryptionMethod):
         """
         super().__init__(keys)
         self.aes_keys = keys.get("aes", [])
+        if not self.aes_keys:
+            raise ValueError(
+                "AESEncryption requires at least one AES key.")
         self.crypter = MultiAES(self.aes_keys)
 
     def _encrypt_raw(self, data: bytes) -> bytes:

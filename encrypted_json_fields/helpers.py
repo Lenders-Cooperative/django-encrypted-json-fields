@@ -22,8 +22,19 @@ def get_default_crypter(keys: dict):
     default_encryption = getattr(settings, "EJF_DEFAULT_ENCRYPTION", None)
     if not default_encryption:
         raise ValueError("EJF_DEFAULT_ENCRYPTION setting is not defined.")
+    # handle the possibility of this being a callable
+    if isinstance(default_encryption, str):
+        encryption_method = default_encryption.lower()
+    elif callable(default_encryption):
+        try:
+            encryption_method = default_encryption().lower()
+        except Exception as e:
+            raise ValueError(
+                f"Error executing EJF_DEFAULT_ENCRYPTION callable: {e}")
+    else:
+        # Define a default encryption method if none is set
+        encryption_method = "fernet"
 
-    normalized_default = default_encryption.lower().strip()
 
     # Match the setting to a registered encryption class by prefix
     for method_type, encryption_class in EncryptionMethod._encryption_registry.items():
