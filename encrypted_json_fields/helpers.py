@@ -46,3 +46,10 @@ def get_default_crypter(keys: dict):
     # If no match is found, raise an error
     raise ValueError(
         f"Encryption method '{default_encryption}' is not a registered encryption class.")
+
+def build_crypter(keys):
+    if not isinstance(keys, (tuple, list)):
+        keys = [
+            keys,
+        ]
+    return get_default_crypter(keys)
