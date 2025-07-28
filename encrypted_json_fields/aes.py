@@ -54,7 +54,7 @@ class MultiAES:
         Returns:
             bytes: The encrypted ciphertext.
         """
-        key = self.keys[-1]
+        key = self.keys[0]  # Use the first (primary) key for encryption
         return self.handler.encrypt(key, plaintext)
 
     def decrypt(self, ciphertext: bytes) -> bytes:
