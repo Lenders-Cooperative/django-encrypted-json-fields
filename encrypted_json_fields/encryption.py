@@ -516,7 +516,7 @@ class AESEncryption(EncryptionInterface):
         if not keys.get(self.method_type.value, []):
             raise ValueError(f"AES encryption requires at least one {self.method_type.value} key.")
 
-        self.crypter = MultiAES(keys[self.method_type.value], self.method_type)
+        self.crypter = MultiAES(keys[self.method_type.value], self.method_type.value)
 
     def encrypt_raw(self, data: bytes) -> bytes:
         """Encrypt raw data using AES.
