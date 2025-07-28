@@ -1,23 +1,20 @@
 import os
 import base64
-from cryptography.fernet import Fernet, MultiFernet, InvalidToken
+from cryptography.exceptions import InvalidTag
+from cryptography.fernet import Fernet, InvalidToken
 from django.core.exceptions import ImproperlyConfigured
 from django.test import TestCase
-from encrypted_json_fields.encryption import (
-    MultiAES,
-    EncryptionMethod,
-    FernetEncryption,
-    AESEncryption,
-)
+from encrypted_json_fields.constants import EncryptionTypes
+from encrypted_json_fields.encryption import FernetEncryption, AESCBCEncryption, AESGCMEncryption
 
 
 class EncryptionTests(TestCase):
     def setUp(self):
         self.fernet_keys = [Fernet.generate_key()]  # Valid Fernet keys
         self.aes_keys = [os.urandom(32)]
-        self.keys = {"aes":self.aes_keys, "fernet": self.fernet_keys}
+        self.keys = {"aes": self.aes_keys, "fernet": self.fernet_keys}
         self.fernet_encryption = FernetEncryption(self.keys)
-        self.aes_encryption = AESEncryption(self.keys)
+        self.aes_encryption = AESCBCEncryption(self.keys)
 
     def test_encrypt_decrypt_fernet(self):
         data = b"test data"
@@ -38,19 +35,17 @@ class EncryptionTests(TestCase):
     def test_decryption_with_invalid_key_fails(self):
         data = b"test data"
         encrypted = self.fernet_encryption.encrypt(data)
-        self.fernet_encryption.keys = {"aes": self.aes_keys, "fernet": [Fernet.generate_key()]}
+        fernet_encryption = FernetEncryption({"aes": self.aes_keys, "fernet": [Fernet.generate_key()]})
         with self.assertRaises(InvalidToken) as context:
-            self.fernet_encryption.decrypt(encrypted)
+            fernet_encryption.decrypt(encrypted)
         self.assertIsInstance(context.exception, InvalidToken)
 
     def test_decryption_with_invalid_key_fails_aes(self):
         data = b"test data"
         encrypted = self.aes_encryption.encrypt(data)
-        self.aes_encryption.keys = {"aes": [os.urandom(32)],
-                                       "fernet": self.fernet_keys}
+        aes_encryption = AESCBCEncryption({"aes": [os.urandom(32)], "fernet": self.fernet_keys})
         with self.assertRaises(ValueError):
-            self.aes_encryption.decrypt(encrypted)
-
+            aes_encryption.decrypt(encrypted)
 
     def test_encryption_disabled_does_not_encrypt_fernet(self):
         self.fernet_encryption.encryption_enabled = False
@@ -69,7 +64,7 @@ class EncryptionTests(TestCase):
         invalid_aes_keys = [os.urandom(16)]  # Use 16 bytes instead of 32
         keys = {"aes": invalid_aes_keys, "fernet": self.fernet_keys}
         with self.assertRaises(ValueError):
-            AESEncryption(keys)
+            AESCBCEncryption(keys)
 
     def test_is_encrypted_internal_fernet(self):
         data = b"test data"
@@ -109,8 +104,7 @@ class EncryptionTests(TestCase):
 
         with self.assertRaises(ValueError) as context:
             self.fernet_encryption.decrypt(invalid_data)
-        self.assertEqual(str(context.exception),
-                         "Invalid prefix or data format for encrypted data")
+        self.assertEqual(str(context.exception), "Invalid prefix or data format for encrypted data")
 
     def test_legacy_fernet_decryption(self):
         raw_fernet = Fernet(self.fernet_keys[0])
@@ -131,9 +125,9 @@ class EncryptionTests(TestCase):
         self.assertEqual(decrypted, data)
 
     def test_improperly_configured_keys(self):
-        # Test with AESEncryption
+        # Test with AESCBCEncryption
         with self.assertRaises(ImproperlyConfigured):
-            AESEncryption([]).get_crypter_keys()
+            AESCBCEncryption([]).get_crypter_keys()
 
         # Test with FernetEncryption
         with self.assertRaises(ImproperlyConfigured):
@@ -163,9 +157,7 @@ class EncryptionTests(TestCase):
             "key1": "no_encrypt",
             "key2": {"skip": "leave_me", "encrypt": "this_one"},
         }
-        encrypted = self.fernet_encryption.encrypt_values(
-            nested_data, json_skip_keys=["skip"]
-        )
+        encrypted = self.fernet_encryption.encrypt_values(nested_data, json_skip_keys=["skip"])
         # 'skip' should not be encrypted
         self.assertEqual(encrypted["key2"]["skip"], "leave_me")
         self.assertNotEqual(encrypted["key2"]["encrypt"], "this_one")
@@ -176,3 +168,47 @@ class EncryptionTests(TestCase):
         corrupted = encrypted[:10] + b"corruption" + encrypted[10:]
         with self.assertRaises(ValueError):
             self.aes_encryption.decrypt(corrupted)
+
+
+class AESGCMEncryptionTests(TestCase):
+    def setUp(self):
+        self.aes_keys = [os.urandom(32)]
+        self.keys = {EncryptionTypes.AES_GCM.value: self.aes_keys}
+        self.aes_gcm_encryption = AESGCMEncryption(self.keys)
+
+    def test_encrypt_decrypt_aes_gcm(self):
+        data = b"test data"
+        encrypted = self.aes_gcm_encryption.encrypt(data)
+        self.assertNotEqual(encrypted, data)
+        self.assertTrue(encrypted.startswith(b"aes_gcm:"))
+        decrypted = self.aes_gcm_encryption.decrypt(encrypted)
+        self.assertEqual(decrypted, data)
+
+    def test_decryption_with_invalid_key_fails_aes_gcm(self):
+        data = b"test data"
+        encrypted = self.aes_gcm_encryption.encrypt(data)
+        aes_gcm_encryption = AESGCMEncryption({EncryptionTypes.AES_GCM.value: [os.urandom(32)]})
+        with self.assertRaises(InvalidTag) as context:
+            aes_gcm_encryption.decrypt(encrypted)
+        self.assertIsInstance(context.exception, InvalidTag)
+
+    def test_encryption_disabled_does_not_encrypt_aes_gcm(self):
+        self.aes_gcm_encryption.encryption_enabled = False
+        data = b"test data"
+        encrypted = self.aes_gcm_encryption.encrypt(data)
+        self.assertEqual(encrypted, data)
+
+    def test_aes_gcm_invalid_key_length(self):
+        invalid_aes_keys = [os.urandom(16)]  # Use 16 bytes instead of 32
+        keys = {EncryptionTypes.AES_GCM.value: invalid_aes_keys}
+        with self.assertRaises(ValueError):
+            AESGCMEncryption(keys)
+
+    def test_aes_gcm_decrypt_fails_with_corrupted_data(self):
+        data = b"test data"
+        encrypted = self.aes_gcm_encryption.encrypt(data)
+        non_ct_data = len(EncryptionTypes.AES_GCM.value) + 12
+        corrupted = encrypted[:non_ct_data] + b"corruption" + encrypted[non_ct_data:]
+        with self.assertRaises(InvalidTag) as context:
+            self.aes_gcm_encryption.decrypt(corrupted)
+        self.assertIsInstance(context.exception, InvalidTag)
