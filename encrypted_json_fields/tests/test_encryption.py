@@ -172,11 +172,9 @@ class EncryptionTests(TestCase):
 
 class AESGCMEncryptionTests(TestCase):
     def setUp(self):
-        self.aes_keys = [os.urandom(32)]
-        self.keys = {EncryptionTypes.AES_GCM.value: self.aes_keys}
-        self.aes_gcm_encryption = AESGCMEncryption(self.keys)
+        self.aes_gcm_encryption = AESGCMEncryption({EncryptionTypes.AES_GCM.value: [os.urandom(32)]})
 
-    def test_encrypt_decrypt_aes_gcm(self):
+    def test_aes_gcm_encrypt_decrypt(self):
         data = b"test data"
         encrypted = self.aes_gcm_encryption.encrypt(data)
         self.assertNotEqual(encrypted, data)
@@ -184,7 +182,7 @@ class AESGCMEncryptionTests(TestCase):
         decrypted = self.aes_gcm_encryption.decrypt(encrypted)
         self.assertEqual(decrypted, data)
 
-    def test_decryption_with_invalid_key_fails_aes_gcm(self):
+    def test_aes_gcm_decryption_with_invalid_key_fails(self):
         data = b"test data"
         encrypted = self.aes_gcm_encryption.encrypt(data)
         aes_gcm_encryption = AESGCMEncryption({EncryptionTypes.AES_GCM.value: [os.urandom(32)]})
@@ -192,7 +190,7 @@ class AESGCMEncryptionTests(TestCase):
             aes_gcm_encryption.decrypt(encrypted)
         self.assertIsInstance(context.exception, InvalidTag)
 
-    def test_encryption_disabled_does_not_encrypt_aes_gcm(self):
+    def test_aes_gcm_encryption_disabled_does_not_encrypt(self):
         self.aes_gcm_encryption.encryption_enabled = False
         data = b"test data"
         encrypted = self.aes_gcm_encryption.encrypt(data)
@@ -200,15 +198,15 @@ class AESGCMEncryptionTests(TestCase):
 
     def test_aes_gcm_invalid_key_length(self):
         invalid_aes_keys = [os.urandom(16)]  # Use 16 bytes instead of 32
-        keys = {EncryptionTypes.AES_GCM.value: invalid_aes_keys}
-        with self.assertRaises(ValueError):
-            AESGCMEncryption(keys)
+        with self.assertRaises(ValueError) as context:
+            AESGCMEncryption({EncryptionTypes.AES_GCM.value: invalid_aes_keys})
+        self.assertIn("All AES keys must be 256 bits (32 bytes).", str(context.exception))
 
     def test_aes_gcm_decrypt_fails_with_corrupted_data(self):
         data = b"test data"
         encrypted = self.aes_gcm_encryption.encrypt(data)
-        non_ct_data = len(EncryptionTypes.AES_GCM.value) + 12
-        corrupted = encrypted[:non_ct_data] + b"corruption" + encrypted[non_ct_data:]
+        non_ciphertext_data_length = len(EncryptionTypes.AES_GCM.value) + 1 + 12
+        corrupted = encrypted[:non_ciphertext_data_length] + b"corruption" + encrypted[non_ciphertext_data_length:]
         with self.assertRaises(InvalidTag) as context:
             self.aes_gcm_encryption.decrypt(corrupted)
         self.assertIsInstance(context.exception, InvalidTag)
