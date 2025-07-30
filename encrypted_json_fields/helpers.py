@@ -1,7 +1,5 @@
 """Helpers for managing encryption methods in Django Encrypted Fields."""
 
-from django.conf import settings
-
 
 def get_default_crypter(keys: dict):
     """
@@ -21,14 +19,21 @@ def get_default_crypter(keys: dict):
         EncryptionInterface: Instance of the selected encryption class.
     """
     # pylint: disable=import-outside-toplevel
+    from constance import config
+    from django.conf import settings
+
     from .encryption import EncryptionInterface
 
     # pylint:enable=import-outside-toplevel
 
     # Retrieve the default encryption method from Django settings
-    default_encryption = getattr(settings, "EJF_DEFAULT_ENCRYPTION", None)
-    if not default_encryption:
-        raise ValueError("EJF_DEFAULT_ENCRYPTION setting is not defined.")
+    if hasattr(settings, "EJF_DEFAULT_ENCRYPTION"):
+        default_encryption = settings.EJF_DEFAULT_ENCRYPTION
+    elif hasattr(config, "SECURITY_EJF_DEFAULT_ENCRYPTION"):
+        default_encryption = config.SECURITY_EJF_DEFAULT_ENCRYPTION
+    else:
+        # Raise an error if neither setting is defined
+        raise ValueError("EJF default encryption setting is not defined.")
 
     # Determine the encryption method name (string)
     if isinstance(default_encryption, str):
@@ -38,7 +43,7 @@ def get_default_crypter(keys: dict):
         try:
             encryption_method = default_encryption().lower()
         except Exception as e:
-            raise ValueError(f"Error executing EJF_DEFAULT_ENCRYPTION callable: {e}") from e
+            raise ValueError(f"Error executing EJF default encryption callable: {e}") from e
     else:
         # Fallback to 'fernet' if not a string or callable
         encryption_method = "fernet"
