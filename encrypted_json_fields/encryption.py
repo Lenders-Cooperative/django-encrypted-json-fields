@@ -428,7 +428,7 @@ class FernetEncryption(EncryptionInterface):
             raise ValueError("Fernet encryption requires at least one Fernet key.")
 
         try:
-            self.crypter = MultiFernet([Fernet(key) for key in keys[self.method_type.value]])
+            self.crypter = MultiFernet([Fernet(base64.urlsafe_b64encode(key)) for key in keys[self.method_type.value]])
         except Exception as excp:
             raise ValueError(f"Invalid Fernet key: {excp}") from excp
 
@@ -560,7 +560,7 @@ class AESEncryption(EncryptionInterface):
 class AESCBCEncryption(AESEncryption):
     """Implementation of encryption using AES in CBC mode."""
 
-    method_type = EncryptionTypes.AES
+    method_type = EncryptionTypes.AES_CBC
 
 
 class AESGCMEncryption(AESEncryption):
@@ -569,6 +569,6 @@ class AESGCMEncryption(AESEncryption):
     method_type = EncryptionTypes.AES_GCM
 
 
-EncryptionInterface.register_encryption_method(EncryptionTypes.AES, AESCBCEncryption)
+EncryptionInterface.register_encryption_method(EncryptionTypes.AES_CBC, AESCBCEncryption)
 EncryptionInterface.register_encryption_method(EncryptionTypes.AES_GCM, AESGCMEncryption)
 EncryptionInterface.register_encryption_method(EncryptionTypes.FERNET, FernetEncryption)

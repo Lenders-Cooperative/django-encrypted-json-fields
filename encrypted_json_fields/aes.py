@@ -229,6 +229,6 @@ class GCMModeHandler(AESModeHandler):
 
 # Registering the AES modes
 MODE_REGISTRY: dict[str, AESModeHandler] = {
-    EncryptionTypes.AES.value: CBCModeHandler(),
+    EncryptionTypes.AES_CBC.value: CBCModeHandler(),
     EncryptionTypes.AES_GCM.value: GCMModeHandler(),
 }

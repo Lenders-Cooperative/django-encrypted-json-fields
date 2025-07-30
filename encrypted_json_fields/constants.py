@@ -9,6 +9,6 @@ class EncryptionTypes(Enum):
     class, you can add a matching attribute here.
     """
 
-    AES = "aes"  # CBC mode
+    AES_CBC = "aes"
     AES_GCM = "aes_gcm"
     FERNET = "fernet"
