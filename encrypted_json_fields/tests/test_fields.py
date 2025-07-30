@@ -1,39 +1,33 @@
 import os
-from unittest.mock import patch
-from django.test import TestCase, TransactionTestCase
-import datetime
 from datetime import date, timedelta
+from unittest.mock import patch
+
 from django.core.exceptions import ValidationError
 from django.db import connection, transaction
+from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 from encrypted_json_fields.encryption import FernetEncryption
-from testapp.models import TestModel, TestSearchableModel, CrypterConfigMixin
-from cryptography.fernet import Fernet
-from django.db import models
 from encrypted_json_fields.fields import (
+    EncryptedBigIntegerField,
+    EncryptedBooleanField,
     EncryptedCharField,
-    EncryptedTextField,
     EncryptedDateField,
     EncryptedDateTimeField,
-    EncryptedBooleanField,
     EncryptedIntegerField,
-    EncryptedPositiveIntegerField,
-    EncryptedSmallIntegerField,
-    EncryptedPositiveSmallIntegerField,
-    EncryptedBigIntegerField,
     EncryptedJSONField,
+    EncryptedPositiveIntegerField,
+    EncryptedPositiveSmallIntegerField,
+    EncryptedSmallIntegerField,
+    EncryptedTextField,
 )
-from django.apps import apps
+from testapp.models import TestModel, TestSearchableModel
 
 
 class EncryptedFieldsBaseTestCase:
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.keys = {
-            'fernet': [Fernet.generate_key()],
-            'aes': [os.urandom(32)]
-        }
+        cls.keys = {"fernet": [os.urandom(32)], "aes": [os.urandom(32)]}
 
     def setUp(self):
         super().setUp()
@@ -45,32 +39,38 @@ class EncryptedFieldsBaseTestCase:
 
         for model in [TestModel, TestSearchableModel]:
             for field in model._meta.fields:
-                if isinstance(field, (EncryptedCharField, EncryptedTextField,
-                                    EncryptedDateField,
-                                    EncryptedDateTimeField,
-                                    EncryptedBooleanField,
-                                    EncryptedIntegerField,
-                                    EncryptedPositiveIntegerField,
-                                    EncryptedSmallIntegerField,
-                                    EncryptedPositiveSmallIntegerField,
-                                    EncryptedBigIntegerField,
-                                    EncryptedJSONField)):
+                if isinstance(
+                    field,
+                    (
+                        EncryptedCharField,
+                        EncryptedTextField,
+                        EncryptedDateField,
+                        EncryptedDateTimeField,
+                        EncryptedBooleanField,
+                        EncryptedIntegerField,
+                        EncryptedPositiveIntegerField,
+                        EncryptedSmallIntegerField,
+                        EncryptedPositiveSmallIntegerField,
+                        EncryptedBigIntegerField,
+                        EncryptedJSONField,
+                    ),
+                ):
                     field._crypter = lambda: self.crypter
 
     def create_test_model(self, **kwargs):
         """Helper method to create a test model with default values"""
         defaults = {
-            'enc_char_field': "default",
-            'enc_text_field': "default text",
-            'enc_boolean_field': True,
-            'enc_json_field': {},
-            'enc_date_field': None,
-            'enc_datetime_field': None,
-            'enc_integer_field': None,
-            'enc_positive_integer_field': None,
-            'enc_small_integer_field': None,
-            'enc_positive_small_integer_field': None,
-            'enc_big_integer_field': None
+            "enc_char_field": "default",
+            "enc_text_field": "default text",
+            "enc_boolean_field": True,
+            "enc_json_field": {},
+            "enc_date_field": None,
+            "enc_datetime_field": None,
+            "enc_integer_field": None,
+            "enc_positive_integer_field": None,
+            "enc_small_integer_field": None,
+            "enc_positive_small_integer_field": None,
+            "enc_big_integer_field": None,
         }
         defaults.update(kwargs)
         model = TestModel(**defaults)
@@ -123,17 +123,13 @@ class EncryptedFieldsTests(EncryptedFieldsBaseTestCase, TestCase):
 
         # Check raw value in database is encrypted
         with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT enc_date_field FROM testapp_testmodel WHERE id = %s",
-                [model.pk]
-            )
+            cursor.execute("SELECT enc_date_field FROM testapp_testmodel WHERE id = %s", [model.pk])
             raw_value = cursor.fetchone()[0]
             self.assertTrue(self.crypter.is_encrypted(raw_value))
 
         # Now test auto_now behavior across different dates
-        initial_datetime = timezone.now().replace(year=2024, month=1, day=1,
-                                                  hour=12, minute=0)
-        with patch('django.utils.timezone.now') as mock_now:
+        initial_datetime = timezone.now().replace(year=2024, month=1, day=1, hour=12, minute=0)
+        with patch("django.utils.timezone.now") as mock_now:
             # Set initial date
             mock_now.return_value = initial_datetime
 
@@ -152,15 +148,11 @@ class EncryptedFieldsTests(EncryptedFieldsBaseTestCase, TestCase):
             fresh_model = TestModel.objects.get(pk=model.pk)
 
             self.assertNotEqual(fresh_model.enc_date_now_field, original_date)
-            self.assertEqual(fresh_model.enc_date_now_field,
-                             next_day_datetime.date())
+            self.assertEqual(fresh_model.enc_date_now_field, next_day_datetime.date())
 
             # Verify encryption
             with connection.cursor() as cursor:
-                cursor.execute(
-                    "SELECT enc_date_now_field FROM testapp_testmodel WHERE id = %s",
-                    [fresh_model.pk]
-                )
+                cursor.execute("SELECT enc_date_now_field FROM testapp_testmodel WHERE id = %s", [fresh_model.pk])
                 raw_value = cursor.fetchone()[0]
                 self.assertTrue(self.crypter.is_encrypted(raw_value))
 
@@ -189,12 +181,11 @@ class EncryptedFieldsTests(EncryptedFieldsBaseTestCase, TestCase):
     def test_encrypted_integer_fields(self):
         """Test all integer field types"""
         test_cases = [
-            ('enc_integer_field', [-1000, 0, 1000]),
-            ('enc_positive_integer_field', [0, 1, 1000]),
-            ('enc_small_integer_field', [-32768, 0, 32767]),
-            ('enc_positive_small_integer_field', [0, 1, 32767]),
-            ('enc_big_integer_field',
-             [-9223372036854775808, 0, 9223372036854775807])
+            ("enc_integer_field", [-1000, 0, 1000]),
+            ("enc_positive_integer_field", [0, 1, 1000]),
+            ("enc_small_integer_field", [-32768, 0, 32767]),
+            ("enc_positive_small_integer_field", [0, 1, 32767]),
+            ("enc_big_integer_field", [-9223372036854775808, 0, 9223372036854775807]),
         ]
 
         for field_name, values in test_cases:
@@ -213,26 +204,27 @@ class EncryptedFieldsTests(EncryptedFieldsBaseTestCase, TestCase):
             {"null": None},  # Null should remain null
             {"nested": {"key": "value2"}},  # Nested values should be encrypted
             {"list": [1, 2, 3]},  # List values should be encrypted
-            {"complex": {
-                "string": "value3",
-                "number": 123,
-                "boolean": True,
-                "null": None,
-                "list": [1, "2", 3.0, False],
-                "nested": {"key": "value4"}
-            }},
+            {
+                "complex": {
+                    "string": "value3",
+                    "number": 123,
+                    "boolean": True,
+                    "null": None,
+                    "list": [1, "2", 3.0, False],
+                    "nested": {"key": "value4"},
+                }
+            },
             [],  # Empty list - should remain empty
             [1, 2, 3],  # List values should be encrypted
             ["a", "b", "c"],  # List string values should be encrypted
-            [{"key": "value5"}, {"key2": "value6"}]
+            [{"key": "value5"}, {"key2": "value6"}],
             # Nested dict values should be encrypted
         ]
 
         for value in test_values:
             model = self.create_test_model(enc_json_field=value)
 
-            raw_value = TestModel.objects.filter(pk=model.pk).values_list(
-                "enc_json_field", flat=True).first()
+            raw_value = TestModel.objects.filter(pk=model.pk).values_list("enc_json_field", flat=True).first()
             print(f"Raw Encrypted Value (before decryption): {raw_value}")
 
             loaded = TestModel.objects.get(pk=model.pk)
@@ -271,32 +263,24 @@ class EncryptedFieldsTests(EncryptedFieldsBaseTestCase, TestCase):
 
         # Create model using all search fields
         search_model = TestSearchableModel.objects.create(
-            char_field=char_value,
-            date_field=test_date,
-            integer_field=test_integer
+            char_field=char_value, date_field=test_date, integer_field=test_integer
         )
 
         # Force a refresh
         search_model.refresh_from_db()
 
         # Test char field search
-        char_found = TestSearchableModel.objects.filter(
-            char_field=char_value
-        ).exists()
+        char_found = TestSearchableModel.objects.filter(char_field=char_value).exists()
 
         self.assertTrue(char_found)
 
         # Test date field search
-        date_found = TestSearchableModel.objects.filter(
-            date_field=test_date
-        ).exists()
+        date_found = TestSearchableModel.objects.filter(date_field=test_date).exists()
 
         self.assertTrue(date_found)
 
         # Test integer field search
-        integer_found = TestSearchableModel.objects.filter(
-            integer_field=test_integer
-        ).exists()
+        integer_found = TestSearchableModel.objects.filter(integer_field=test_integer).exists()
 
         self.assertTrue(integer_found)
 
@@ -304,29 +288,23 @@ class EncryptedFieldsTests(EncryptedFieldsBaseTestCase, TestCase):
         wrong_date = date(2022, 1, 1)
         wrong_integer = 99
 
-        self.assertFalse(
-            TestSearchableModel.objects.filter(date_field=wrong_date).exists()
-        )
-        self.assertFalse(
-            TestSearchableModel.objects.filter(
-                integer_field=wrong_integer).exists()
-        )
+        self.assertFalse(TestSearchableModel.objects.filter(date_field=wrong_date).exists())
+        self.assertFalse(TestSearchableModel.objects.filter(integer_field=wrong_integer).exists())
 
     def test_null_handling(self):
         """Test handling of null values"""
         nullable_fields = [
-            'enc_date_field',
-            'enc_datetime_field',
-            'enc_integer_field',
-            'enc_positive_integer_field',
-            'enc_small_integer_field',
-            'enc_positive_small_integer_field',
-            'enc_big_integer_field'
+            "enc_date_field",
+            "enc_datetime_field",
+            "enc_integer_field",
+            "enc_positive_integer_field",
+            "enc_small_integer_field",
+            "enc_positive_small_integer_field",
+            "enc_big_integer_field",
         ]
 
         # Test setting fields to None
-        model = self.create_test_model(
-            **{field: None for field in nullable_fields})
+        model = self.create_test_model(**{field: None for field in nullable_fields})
         loaded = TestModel.objects.get(pk=model.pk)
 
         for field in nullable_fields:
@@ -352,16 +330,15 @@ class EncryptedFieldsValidationTests(EncryptedFieldsBaseTestCase, TransactionTes
 
             # Test integer range validations
             with self.assertRaises(Exception):
-                TestModel.objects.create(
-                    enc_small_integer_field=32768)  # Exceeds SmallIntegerField max
+                TestModel.objects.create(enc_small_integer_field=32768)  # Exceeds SmallIntegerField max
+
+            with self.assertRaises(Exception):
+                TestModel.objects.create(enc_small_integer_field=-32769)  # Below SmallIntegerField min
 
             with self.assertRaises(Exception):
                 TestModel.objects.create(
-                    enc_small_integer_field=-32769)  # Below SmallIntegerField min
-
-            with self.assertRaises(Exception):
-                TestModel.objects.create(
-                    enc_positive_small_integer_field=32768)  # Exceeds PositiveSmallIntegerField max
+                    enc_positive_small_integer_field=32768
+                )  # Exceeds PositiveSmallIntegerField max
 
             # Test date field validation
             with self.assertRaises(Exception):
@@ -384,7 +361,7 @@ class EncryptedFieldsValidationTests(EncryptedFieldsBaseTestCase, TransactionTes
             with transaction.atomic():
                 TestModel.objects.all().delete()
                 TestSearchableModel.objects.all().delete()
-        except:
+        except Exception:
             transaction.rollback()
             TestModel.objects.all().delete()
             TestSearchableModel.objects.all().delete()

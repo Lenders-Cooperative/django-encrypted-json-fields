@@ -1,5 +1,5 @@
 import os
-from cryptography.fernet import Fernet
+
 from django.test import TestCase, override_settings
 from encrypted_json_fields.encryption import AESCBCEncryption, FernetEncryption
 from encrypted_json_fields.helpers import get_default_crypter
@@ -8,7 +8,7 @@ from encrypted_json_fields.helpers import get_default_crypter
 class GetDefaultCrypterTest(TestCase):
     def setUp(self):
         # Mock encryption keys
-        self.keys = {"aes": [os.urandom(32)], "fernet": [Fernet.generate_key()]}
+        self.keys = {"aes": [os.urandom(32)], "fernet": [os.urandom(32)]}
 
     @override_settings(EJF_DEFAULT_ENCRYPTION="aes")
     def test_get_default_crypter_aes(self):

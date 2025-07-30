@@ -1,16 +1,21 @@
-import os
 import base64
+import os
+
 from cryptography.exceptions import InvalidTag
 from cryptography.fernet import Fernet, InvalidToken
 from django.core.exceptions import ImproperlyConfigured
 from django.test import TestCase
 from encrypted_json_fields.constants import EncryptionTypes
-from encrypted_json_fields.encryption import FernetEncryption, AESCBCEncryption, AESGCMEncryption
+from encrypted_json_fields.encryption import (
+    AESCBCEncryption,
+    AESGCMEncryption,
+    FernetEncryption,
+)
 
 
 class EncryptionTests(TestCase):
     def setUp(self):
-        self.fernet_keys = [Fernet.generate_key()]  # Valid Fernet keys
+        self.fernet_keys = [os.urandom(32)]  # Valid Fernet keys
         self.aes_keys = [os.urandom(32)]
         self.keys = {"aes": self.aes_keys, "fernet": self.fernet_keys}
         self.fernet_encryption = FernetEncryption(self.keys)
@@ -35,7 +40,7 @@ class EncryptionTests(TestCase):
     def test_decryption_with_invalid_key_fails(self):
         data = b"test data"
         encrypted = self.fernet_encryption.encrypt(data)
-        fernet_encryption = FernetEncryption({"aes": self.aes_keys, "fernet": [Fernet.generate_key()]})
+        fernet_encryption = FernetEncryption({"aes": self.aes_keys, "fernet": [os.urandom(32)]})
         with self.assertRaises(InvalidToken) as context:
             fernet_encryption.decrypt(encrypted)
         self.assertIsInstance(context.exception, InvalidToken)
@@ -74,7 +79,7 @@ class EncryptionTests(TestCase):
         self.assertTrue(self.fernet_encryption.is_encrypted(encrypted_prefixed))
 
         # Test with legacy data: raw Fernet encryption without prefix
-        raw_fernet = Fernet(self.fernet_keys[0])
+        raw_fernet = Fernet(base64.urlsafe_b64encode(self.fernet_keys[0]))
         encrypted_legacy = raw_fernet.encrypt(data)  # legacy fernet token
         # Should also be recognized as encrypted
         self.assertTrue(self.fernet_encryption.is_encrypted(encrypted_legacy))
@@ -107,7 +112,7 @@ class EncryptionTests(TestCase):
         self.assertEqual(str(context.exception), "Invalid prefix or data format for encrypted data")
 
     def test_legacy_fernet_decryption(self):
-        raw_fernet = Fernet(self.fernet_keys[0])
+        raw_fernet = Fernet(base64.urlsafe_b64encode(self.fernet_keys[0]))
         data = b"test data"
         encrypted = raw_fernet.encrypt(data)  # Legacy data (just a Fernet token)
         decrypted = self.fernet_encryption.decrypt(encrypted)
