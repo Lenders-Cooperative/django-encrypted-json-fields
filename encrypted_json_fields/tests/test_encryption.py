@@ -1,7 +1,6 @@
 import base64
 import os
 
-from cryptography.exceptions import InvalidTag
 from cryptography.fernet import Fernet, InvalidToken
 from django.core.exceptions import ImproperlyConfigured
 from django.test import TestCase
@@ -21,85 +20,6 @@ class EncryptionTests(TestCase):
         self.fernet_encryption = FernetEncryption(self.keys)
         self.aes_encryption = AESCBCEncryption(self.keys)
 
-    def test_encrypt_decrypt_fernet(self):
-        data = b"test data"
-        encrypted = self.fernet_encryption.encrypt(data)  # prefix + no double Base64 needed
-        self.assertNotEqual(encrypted, data)
-        self.assertTrue(encrypted.startswith(b"fernet:"))
-        decrypted = self.fernet_encryption.decrypt(encrypted)
-        self.assertEqual(decrypted, data)
-
-    def test_encrypt_decrypt_aes(self):
-        data = b"test data"
-        encrypted = self.aes_encryption.encrypt(data)  # prefix + base64
-        self.assertNotEqual(encrypted, data)
-        self.assertTrue(encrypted.startswith(b"aes:"))
-        decrypted = self.aes_encryption.decrypt(encrypted)
-        self.assertEqual(decrypted, data)
-
-    def test_decryption_with_invalid_key_fails(self):
-        data = b"test data"
-        encrypted = self.fernet_encryption.encrypt(data)
-        fernet_encryption = FernetEncryption({"aes": self.aes_keys, "fernet": [os.urandom(32)]})
-        with self.assertRaises(InvalidToken) as context:
-            fernet_encryption.decrypt(encrypted)
-        self.assertIsInstance(context.exception, InvalidToken)
-
-    def test_decryption_with_invalid_key_fails_aes(self):
-        data = b"test data"
-        encrypted = self.aes_encryption.encrypt(data)
-        aes_encryption = AESCBCEncryption({"aes": [os.urandom(32)], "fernet": self.fernet_keys})
-        with self.assertRaises(ValueError):
-            aes_encryption.decrypt(encrypted)
-
-    def test_encryption_disabled_does_not_encrypt_fernet(self):
-        self.fernet_encryption.encryption_enabled = False
-        data = b"test data"
-        encrypted = self.fernet_encryption.encrypt(data)
-        # If disabled, 'encrypt' returns original data as is
-        self.assertEqual(encrypted, data)
-
-    def test_encryption_disabled_does_not_encrypt_aes(self):
-        self.aes_encryption.encryption_enabled = False
-        data = b"test data"
-        encrypted = self.aes_encryption.encrypt(data)
-        self.assertEqual(encrypted, data)
-
-    def test_aes_invalid_key_length(self):
-        invalid_aes_keys = [os.urandom(16)]  # Use 16 bytes instead of 32
-        keys = {"aes": invalid_aes_keys, "fernet": self.fernet_keys}
-        with self.assertRaises(ValueError):
-            AESCBCEncryption(keys)
-
-    def test_is_encrypted_internal_fernet(self):
-        data = b"test data"
-
-        # Test with prefixed data (Fernet no extra base64)
-        encrypted_prefixed = self.fernet_encryption.encrypt(data)
-        self.assertTrue(self.fernet_encryption.is_encrypted(encrypted_prefixed))
-
-        # Test with legacy data: raw Fernet encryption without prefix
-        raw_fernet = Fernet(base64.urlsafe_b64encode(self.fernet_keys[0]))
-        encrypted_legacy = raw_fernet.encrypt(data)  # legacy fernet token
-        # Should also be recognized as encrypted
-        self.assertTrue(self.fernet_encryption.is_encrypted(encrypted_legacy))
-
-        # Test with invalid data:
-        # Create data that starts with unknown prefix + base64 nonsense
-        unknown_prefix = b"UnknownPrefix:"
-        # Make some random binary data to encode
-        random_data = os.urandom(10)
-        base64_data = base64.urlsafe_b64encode(random_data)
-        invalid_data = unknown_prefix + base64_data
-        # Should return False, not recognized as encrypted
-        self.assertFalse(self.fernet_encryption.is_encrypted(invalid_data))
-
-    def test_is_encrypted_internal_aes(self):
-        data = b"test data"
-        encrypted = self.aes_encryption.encrypt(data)
-        # After decode and prefix check inside is_encrypted, it should confirm
-        self.assertTrue(self.aes_encryption.is_encrypted(encrypted))
-
     def test_decrypt_with_invalid_prefix(self):
         # Create data with unknown prefix and urlsafe base64 random data
         unknown_prefix = b"BadPrefix:"
@@ -109,7 +29,7 @@ class EncryptionTests(TestCase):
 
         with self.assertRaises(ValueError) as context:
             self.fernet_encryption.decrypt(invalid_data)
-        self.assertEqual(str(context.exception), "Invalid prefix or data format for encrypted data")
+        self.assertEqual(str(context.exception), "Invalid prefix or data format for encrypted data.")
 
     def test_legacy_fernet_decryption(self):
         raw_fernet = Fernet(base64.urlsafe_b64encode(self.fernet_keys[0]))
@@ -167,12 +87,115 @@ class EncryptionTests(TestCase):
         self.assertEqual(encrypted["key2"]["skip"], "leave_me")
         self.assertNotEqual(encrypted["key2"]["encrypt"], "this_one")
 
-    def test_aes_decrypt_fails_with_corrupted_data(self):
+
+class FernetEncryptionTests(TestCase):
+    def setUp(self):
+        self.fernet_encryption = FernetEncryption({EncryptionTypes.FERNET.value: [os.urandom(32)]})
+
+    def test_fernet_encrypt_decrypt(self):
         data = b"test data"
-        encrypted = self.aes_encryption.encrypt(data)
+        encrypted = self.fernet_encryption.encrypt(data)
+        self.assertNotEqual(encrypted, data)
+        self.assertTrue(encrypted.startswith(b"fernet:"))
+        decrypted = self.fernet_encryption.decrypt(encrypted)
+        self.assertEqual(decrypted, data)
+
+    def test_fernet_decryption_with_invalid_key_fails(self):
+        data = b"test data"
+        encrypted = self.fernet_encryption.encrypt(data)
+        fernet_encryption = FernetEncryption({EncryptionTypes.FERNET.value: [os.urandom(32)]})
+        with self.assertRaises(InvalidToken) as context:
+            fernet_encryption.decrypt(encrypted)
+        self.assertIsInstance(context.exception, InvalidToken)
+
+    def test_fernet_encryption_disabled_does_not_encrypt(self):
+        self.fernet_encryption.encryption_enabled = False
+        data = b"test data"
+        encrypted = self.fernet_encryption.encrypt(data)
+        self.assertEqual(encrypted, data)
+
+    def test_fernet_invalid_key_length(self):
+        invalid_fernet_keys = [os.urandom(16)]  # Invalid key length
+        with self.assertRaises(ValueError) as context:
+            FernetEncryption({EncryptionTypes.FERNET.value: invalid_fernet_keys})
+        self.assertIn("Invalid Fernet key", str(context.exception))
+
+    def test_fernet_decrypt_fails_with_corrupted_data(self):
+        data = b"test data"
+        encrypted = self.fernet_encryption.encrypt(data)
         corrupted = encrypted[:10] + b"corruption" + encrypted[10:]
-        with self.assertRaises(ValueError):
-            self.aes_encryption.decrypt(corrupted)
+        with self.assertRaises(InvalidToken) as context:
+            self.fernet_encryption.decrypt(corrupted)
+        self.assertIsInstance(context.exception, InvalidToken)
+
+    def test_fernet_is_encrypted_internal(self):
+        data = b"test data"
+
+        # Test with prefixed data (Fernet no extra base64)
+        encrypted_prefixed = self.fernet_encryption.encrypt(data)
+        self.assertTrue(self.fernet_encryption.is_encrypted(encrypted_prefixed))
+
+        # Test with legacy data: raw Fernet encryption without prefix
+        raw_fernet = Fernet(base64.urlsafe_b64encode(self.fernet_encryption.keys[EncryptionTypes.FERNET.value][0]))
+        encrypted_legacy = raw_fernet.encrypt(data)  # legacy fernet token
+        # Should also be recognized as encrypted
+        self.assertTrue(self.fernet_encryption.is_encrypted(encrypted_legacy))
+
+        # Test with invalid data:
+        # Create data that starts with unknown prefix + base64 nonsense
+        unknown_prefix = b"UnknownPrefix:"
+        # Make some random binary data to encode
+        random_data = os.urandom(10)
+        base64_data = base64.urlsafe_b64encode(random_data)
+        invalid_data = unknown_prefix + base64_data
+        # Should return False, not recognized as encrypted
+        self.assertFalse(self.fernet_encryption.is_encrypted(invalid_data))
+
+
+class AESCBCEncryptionTests(TestCase):
+    def setUp(self):
+        self.aes_cbc_encryption = AESCBCEncryption({EncryptionTypes.AES_CBC.value: [os.urandom(32)]})
+
+    def test_aes_cbc_encrypt_decrypt(self):
+        data = b"test data"
+        encrypted = self.aes_cbc_encryption.encrypt(data)
+        self.assertNotEqual(encrypted, data)
+        self.assertTrue(encrypted.startswith(b"aes:"))
+        decrypted = self.aes_cbc_encryption.decrypt(encrypted)
+        self.assertEqual(decrypted, data)
+
+    def test_aes_cbc_decryption_with_invalid_key_fails(self):
+        data = b"test data"
+        encrypted = self.aes_cbc_encryption.encrypt(data)
+        aes_cbc_encryption = AESCBCEncryption({EncryptionTypes.AES_CBC.value: [os.urandom(32)]})
+        with self.assertRaises(ValueError) as context:
+            aes_cbc_encryption.decrypt(encrypted)
+        self.assertIsInstance(context.exception, ValueError)
+
+    def test_aes_cbc_encryption_disabled_does_not_encrypt(self):
+        self.aes_cbc_encryption.encryption_enabled = False
+        data = b"test data"
+        encrypted = self.aes_cbc_encryption.encrypt(data)
+        self.assertEqual(encrypted, data)
+
+    def test_aes_cbc_invalid_key_length(self):
+        invalid_aes_keys = [os.urandom(16)]  # Use 16 bytes instead of 32
+        with self.assertRaises(ValueError) as context:
+            AESCBCEncryption({EncryptionTypes.AES_CBC.value: invalid_aes_keys})
+        self.assertIn("All AES keys must be 256 bits (32 bytes).", str(context.exception))
+
+    def test_aes_cbc_decrypt_fails_with_corrupted_data(self):
+        data = b"test data"
+        encrypted = self.aes_cbc_encryption.encrypt(data)
+        corrupted = encrypted[:10] + b"corruption" + encrypted[10:]
+        with self.assertRaises(ValueError) as context:
+            self.aes_cbc_encryption.decrypt(corrupted)
+        self.assertIsInstance(context.exception, ValueError)
+
+    def test_aes_cbc_is_encrypted_internal(self):
+        data = b"test data"
+        encrypted = self.aes_cbc_encryption.encrypt(data)
+        self.assertTrue(self.aes_cbc_encryption.is_encrypted(encrypted))
 
 
 class AESGCMEncryptionTests(TestCase):
@@ -215,3 +238,8 @@ class AESGCMEncryptionTests(TestCase):
         with self.assertRaises(ValueError) as context:
             self.aes_gcm_encryption.decrypt(corrupted)
         self.assertIsInstance(context.exception, ValueError)
+
+    def test_aes_gcm_is_encrypted_internal(self):
+        data = b"test data"
+        encrypted = self.aes_gcm_encryption.encrypt(data)
+        self.assertTrue(self.aes_gcm_encryption.is_encrypted(encrypted))
