@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from json import JSONEncoder, JSONDecoder
 from typing import Dict, Type, Union
+from constance import config
 from cryptography.fernet import Fernet, MultiFernet, InvalidToken
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
@@ -38,7 +39,7 @@ class EncryptionInterface(ABC):
         encoder: JSONEncoder | None = None,
         decoder: JSONDecoder | None = None,
         force: bool = True,
-    ):
+    ) -> None:
         """
         Initialize the encryption engine with encryption keys and optional JSON (de)serializers.
 
@@ -53,26 +54,31 @@ class EncryptionInterface(ABC):
 
         Args:
             keys (dict): A dictionary of encryption keys.
-            encoder (JSONEncoder, optional): JSON encoder for encoding data.
-            decoder (JSONDecoder, optional): JSON decoder for decoding data.
-            force (bool, optional): Force encryption even if globally disabled.
+            encoder (JSONEncoder, optional): Encoder for encoding data during encryption.
+            decoder (JSONDecoder, optional): Decoder for decoding data during decryption.
+            force (bool, optional): Whether to enforce encryption even if disabled globally. Defaults to True.
 
         Raises:
-            ImproperlyConfigured: If `keys` is missing or not a dictionary.
+            ImproperlyConfigured: If no keys are provided or if keys are not in the expected format.
         """
         if not keys:
-            raise ImproperlyConfigured("Encryption keys must be provided during initialization.")
+            raise ImproperlyConfigured("Encryption keys must be provided.")
         if not isinstance(keys, dict):
-            raise ImproperlyConfigured("Keys must be provided as a dictionary.")
+            raise ImproperlyConfigured("Encryption keys must be a dictionary.")
 
         self.keys = keys
         self.encoder = encoder or JSONEncoder()
         self.decoder = decoder or JSONDecoder()
         self.force = force
-        self.encryption_enabled = getattr(settings, "EJF_ENABLE_ENCRYPTION", True) or force
+        if hasattr(settings, "EJF_ENABLE_ENCRYPTION"):
+            self.encryption_enabled = settings.EJF_ENABLE_ENCRYPTION or force
+        elif hasattr(config, "SECURITY_EJF_ENABLE_ENCRYPTION"):
+            self.encryption_enabled = config.SECURITY_EJF_ENABLE_ENCRYPTION or force
+        else:
+            self.encryption_enabled = True  # Default to True if no setting is defined
 
     @classmethod
-    def register_encryption_method(cls, method_type: Enum, encryption_class: Type["EncryptionInterface"]):
+    def register_encryption_method(cls, method_type: Enum, encryption_class: Type["EncryptionInterface"]) -> None:
         """Register a new encryption method.
 
         Args:
@@ -309,7 +315,9 @@ class EncryptionInterface(ABC):
         except Exception as e:
             raise ValueError(f"Failed to encode and encrypt value: {data} (Error: {e})") from e
 
-    def decrypt_values(self, data) -> Union[dict, list, set, tuple, str]:
+    def decrypt_values(
+        self, data: Union[dict, list, set, tuple, str]
+    ) -> Union[bool, int, float, str, None] | Union[dict, list, set, tuple, str]:
         """
         Recursively decrypts values in a data structure. Used for decrypting JSONField data.
 
@@ -317,7 +325,7 @@ class EncryptionInterface(ABC):
             data (Union[dict, list, set, tuple, str]): The data to decrypt.
 
         Returns:
-            Union[dict, list, set, tuple, str]: The decrypted data.
+            Union[bool, int, float, str, None] | Union[dict, list, set, tuple, str]: The decrypted data.
         """
         if not self.encryption_enabled:
             return data
@@ -358,17 +366,17 @@ class EncryptionInterface(ABC):
         return f"{method_type.value}:".encode("utf-8")
 
     @staticmethod
-    def infer_type(value):
+    def infer_type(value: Union[str, None]) -> Union[bool, int, float, str, None]:
         """Attempt to infer and convert a decrypted string value to its native Python type.
 
         This method avoids the use of `ast.literal_eval` for safety and performance reasons.
         It supports basic type coercion for: None, booleans, integers, and floats.
 
         Args:
-            value: The value to evaluate (typically a string or None).
+            value (Union[str, None]): The value to evaluate (typically a string or None).
 
         Returns:
-            The inferred Python type (e.g., bool, int, float, or str).
+            Union[bool, int, float, str, None]: The inferred Python type.
         """
         if value is None:
             return None
@@ -413,18 +421,18 @@ class FernetEncryption(EncryptionInterface):
 
     method_type = EncryptionTypes.FERNET
 
-    def __init__(self, keys):
+    def __init__(self, keys: dict[str, list[bytes]]) -> None:
         """
         Initialize FernetEncryption with Fernet keys.
 
         Args:
-            keys (dict): Dictionary containing Fernet keys.
+            keys (dict[str, list[bytes]]): Dictionary containing Fernet keys.
 
         Raises:
             ValueError: If no Fernet keys are provided or if any key is invalid.
         """
         super().__init__(keys)
-        if not keys.get(self.method_type.value, []):
+        if not keys.get(self.method_type.value):
             raise ValueError("Fernet encryption requires at least one Fernet key.")
 
         try:
@@ -503,17 +511,17 @@ class AESEncryption(EncryptionInterface):
     Supports multiple AES modes (CBC, GCM, etc.) via MultiAES handler.
     """
 
-    def __init__(self, keys):
+    def __init__(self, keys: dict[str, list[bytes]]) -> None:
         """Initialize AESEncryption with AES keys and mode.
 
         Args:
-            keys (dict): Dictionary containing AES keys for the selected mode.
+            keys (dict[str, list[bytes]]): Dictionary containing AES keys for the selected mode.
 
         Raises:
             ValueError: If no keys are provided for the selected AES mode.
         """
         super().__init__(keys)
-        if not keys.get(self.method_type.value, []):
+        if not keys.get(self.method_type.value):
             raise ValueError(f"AES encryption requires at least one {self.method_type.value} key.")
 
         self.crypter = MultiAES(keys[self.method_type.value], self.method_type.value)
