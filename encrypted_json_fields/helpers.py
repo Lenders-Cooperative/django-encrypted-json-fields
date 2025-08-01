@@ -22,17 +22,19 @@ def get_default_crypter(keys: dict):
     from constance import config
     from django.conf import settings
 
-    from .encryption import EncryptionInterface
+    from .encryption import EncryptionInterface, EncryptionTypes
 
     # pylint:enable=import-outside-toplevel
 
-    # Retrieve the default encryption method from Django settings
+    # Retrieve the default encryption method from Django settings or Constance config
+    default_encryption = None
     if hasattr(settings, "EJF_DEFAULT_ENCRYPTION"):
         default_encryption = settings.EJF_DEFAULT_ENCRYPTION
     elif hasattr(config, "SECURITY_EJF_DEFAULT_ENCRYPTION"):
         default_encryption = config.SECURITY_EJF_DEFAULT_ENCRYPTION
-    else:
-        # Raise an error if neither setting is defined
+
+    # Raise an error if neither setting is defined
+    if not default_encryption:
         raise ValueError("EJF default encryption setting is not defined.")
 
     # Determine the encryption method name (string)
@@ -45,8 +47,8 @@ def get_default_crypter(keys: dict):
         except Exception as e:
             raise ValueError(f"Error executing EJF default encryption callable: {e}") from e
     else:
-        # Fallback to 'fernet' if not a string or callable
-        encryption_method = "fernet"
+        # Fallback to Fernet if not a string or callable
+        encryption_method = EncryptionTypes.FERNET.value
 
     # Search for a registered encryption class matching the method name
     for enc_type, enc_class in EncryptionInterface.get_encryption_registry().items():

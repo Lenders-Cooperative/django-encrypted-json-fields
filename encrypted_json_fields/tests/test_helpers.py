@@ -45,4 +45,4 @@ class GetDefaultCrypterTest(TestCase):
         """Test that a missing EJF_DEFAULT_ENCRYPTION setting raises an error."""
         with self.assertRaises(ValueError) as context:
             get_default_crypter(self.keys)
-        self.assertIn("EJF_DEFAULT_ENCRYPTION setting is not defined", str(context.exception))
+        self.assertIn("EJF default encryption setting is not defined", str(context.exception))

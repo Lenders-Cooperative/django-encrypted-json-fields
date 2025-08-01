@@ -191,9 +191,9 @@ class AESGCMEncryptionTests(TestCase):
         data = b"test data"
         encrypted = self.aes_gcm_encryption.encrypt(data)
         aes_gcm_encryption = AESGCMEncryption({EncryptionTypes.AES_GCM.value: [os.urandom(32)]})
-        with self.assertRaises(InvalidTag) as context:
+        with self.assertRaises(ValueError) as context:
             aes_gcm_encryption.decrypt(encrypted)
-        self.assertIsInstance(context.exception, InvalidTag)
+        self.assertIsInstance(context.exception, ValueError)
 
     def test_aes_gcm_encryption_disabled_does_not_encrypt(self):
         self.aes_gcm_encryption.encryption_enabled = False
@@ -212,6 +212,6 @@ class AESGCMEncryptionTests(TestCase):
         encrypted = self.aes_gcm_encryption.encrypt(data)
         non_ciphertext_data_length = len(EncryptionTypes.AES_GCM.value) + 1 + 12
         corrupted = encrypted[:non_ciphertext_data_length] + b"corruption" + encrypted[non_ciphertext_data_length:]
-        with self.assertRaises(InvalidTag) as context:
+        with self.assertRaises(ValueError) as context:
             self.aes_gcm_encryption.decrypt(corrupted)
-        self.assertIsInstance(context.exception, InvalidTag)
+        self.assertIsInstance(context.exception, ValueError)
