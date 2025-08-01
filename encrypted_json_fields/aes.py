@@ -10,7 +10,7 @@ See: https://cryptography.io/en/latest/
 import os
 
 from abc import ABC, abstractmethod
-from cryptography.exceptions import InvalidSignature
+from cryptography.exceptions import InvalidSignature, InvalidTag
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import hashes, hmac, padding
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -72,7 +72,7 @@ class MultiAES:
         for key in self.keys:
             try:
                 return self.handler.decrypt(key, ciphertext)
-            except (InvalidSignature, ValueError):
+            except (InvalidSignature, InvalidTag, ValueError):
                 continue
 
         raise ValueError("Decryption failed with all keys.")
