@@ -212,7 +212,7 @@ class EncryptionInterface(ABC):
         try:
             return FernetEncryption(self.keys).decrypt_internal(data)
         except InvalidToken as e:
-            raise ValueError("Invalid prefix or data format for encrypted data") from e
+            raise ValueError("Invalid prefix or data format for encrypted data.") from e
 
     def is_encrypted(self, data: Union[str, bytes]) -> bool:
         """Checks if the provided data is encrypted.
@@ -306,14 +306,14 @@ class EncryptionInterface(ABC):
                 encoded_data = repr(data)
                 return self.encrypt_str(encoded_data)
             except Exception as e:
-                raise ValueError(f"Failed to encrypt value: {data} (Error: {e})") from e
+                raise ValueError(f"Failed to encrypt value: {data} (Error: {e}).") from e
 
         try:
             encoder_obj = encoder() if encoder else JSONEncoder()
             encoded_data = encoder_obj.encode(data)
             return self.encrypt_str(encoded_data)
         except Exception as e:
-            raise ValueError(f"Failed to encode and encrypt value: {data} (Error: {e})") from e
+            raise ValueError(f"Failed to encode and encrypt value: {data} (Error: {e}).") from e
 
     def decrypt_values(
         self, data: Union[dict, list, set, tuple, str]
@@ -438,7 +438,7 @@ class FernetEncryption(EncryptionInterface):
         try:
             self.crypter = MultiFernet([Fernet(base64.urlsafe_b64encode(key)) for key in keys[self.method_type.value]])
         except Exception as excp:
-            raise ValueError(f"Invalid Fernet key: {excp}") from excp
+            raise ValueError(f"Invalid Fernet key: {excp}.") from excp
 
     def encrypt_raw(self, data: bytes) -> bytes:
         """

@@ -168,7 +168,7 @@ class CBCModeHandler(AESModeHandler):
         """
         block_size = 16
         if len(ciphertext) < block_size + 32:
-            raise ValueError("Ciphertext too short for CBC")
+            raise ValueError("Ciphertext too short for CBC.")
 
         iv = ciphertext[:block_size]
         ct = ciphertext[block_size:-32]

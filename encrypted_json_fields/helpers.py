@@ -45,7 +45,7 @@ def get_default_crypter(keys: dict):
         try:
             encryption_method = default_encryption().lower()
         except Exception as e:
-            raise ValueError(f"Error executing EJF default encryption callable: {e}") from e
+            raise ValueError(f"Error executing EJF default encryption callable: {e}.") from e
     else:
         # Fallback to Fernet if not a string or callable
         encryption_method = EncryptionTypes.FERNET.value
