@@ -1,180 +1,315 @@
-# Django Encrypted Model Fields (including JSONField)
+# django-encrypted-fields
 
-## About
+`django-encrypted-fields` is a Django library that provides encrypted versions of Django's standard model fields. It uses the **`cryptography`** library for secure encryption and decryption of data, supporting both AES and Fernet encryption methods. It also includes an **Encrypted JSONField** for secure storage of JSON objects and a **hash-based search field** for secure searches.
 
-This is a fork of <https://gitlab.com/lansharkconsulting/django/django-encrypted-model-fields>,
-which in turn was a fork of <https://github.com/foundertherapy/django-cryptographic-fields>.
+---
 
-It has been renamed, and updated to properly support Python3 and the latest
-versions of Django.
+## Features
 
-`django-encrypted-json-fields` is set of fields that wrap standard
-Django fields with encryption provided by the python cryptography
-library. These fields are much more compatible with a 12-factor design
-since they take their encryption key from the settings file instead of a
-file on disk used by `keyczar`.
+- **Encrypted Fields**:
 
-While keyczar is an excellent tool to use for encryption, it's not
-compatible with Python 3, and it requires, for hosts like Heroku, that
-you either check your key file into your git repository for deployment,
-or implement manual post-deployment processing to write the key stored
-in an environment variable into a file that keyczar can read.
+  - Drop-in replacements for Django's fields: `CharField`, `TextField`, `EmailField`, `BooleanField`, `DateField`, `DateTimeField`, `IntegerField`, `JSONField`, etc.
+  - Recursively encrypts values for `EncryptedJSONField`.
+  - Encryption methods: AES and Fernet.
+  - **Crypter** can be static or callable for dynamic initialization.
 
-## JSONField support
+- **Hash-Based Search Field**:
+  - Allows exact, case-insensitive lookups on encrypted fields using a salted hash.
+  - Requires a **companion encrypted field**.
 
-`django-encrypted-json-fields` extends the origin project `django-encrypted-model-fields`
-by adding a specific support for JSONFields, with the following features:
+---
 
-- the encrypted data remains a valid JSON, so you can inherit from django.db.models.JSONField and all validations will still work
-- if the data contains dictionaries, the keys are preserved so that the overall structure remains intact
-- that is: we only encrypt the values
+## Installation
 
-### Implementation notes
+Install the package using `pip`:
 
-I opted to encrypt the repr() of the values, then apply eval() later only (after decrypting).
-
-This is usefull to reconstruct **both the value and the type**; since JSON manages
-only a few simple types, this naive solution just fits the bill.
-
-## The crypter
-
-All functions responsible for encryption/decryption (see below) require a `crypter`, which
-can be obtained in a few ways:
-
-- default crypter: assign a key or a list of keys to the `EJF_ENCRYPTION_KEYS` setting,
-  and a default crypter will be build for you
-- assigning a callable to the `EJF_ENCRYPTION_KEYS` setting, which in turn will
-  return a list of keys as above
-- invoke `build_crypter(keys)` explicitly, and pass the resulting object around
-
-For the latter, the use case I had in mind was the need to keep the data in play text
-on the server, and export encrypted data for a remote client, sharing a common key.
-
-## Deferred get_crypter()
-
-Since `EJF_ENCRYPTION_KEYS` setting now accepts a callable, which might very well
-need to retrieve some data from the Django models, I had to postpone the call to
-get_crypter() until all apps have been loaded.
-
-As a side effect, now you can always and safely call the `generate_encryption_key`
-management command (see below)
-
-## App settings
-
-EJF_ENCRYPTION_KEYS
-
-    either a key, a list of keys, or a callable returning the list of keys to
-    be used for building the default crypter
-
-EJF_DISABLE_ENCRYPTION
-
-    skip encryption when saving the model (save data unencrypted)
-
-## Helpers
-
-All function used internally when saving and reading Django models can also be
-invoked explicitly to apply encryption/decryption to arbitrary strings or JSON
-values.
-
-A possible use case consists in serializing encrypted data to be sent to a remote
-client.
-
-| Function | Purpone |
-| ----------- | ----------- |
-| `generate_random_encryption_key()` | generate a key |
-| `build_crypter(keys)` | given a list of keys (or a key) builds the corresponding crypter |
-| `is_encrypted(s: Union[str, bytes]) -> bool `| Check if the given string (or bytes) is the result of an encryption |
-| `encrypt_str(s: str, crypter=None, force=False) -> bytes` | Encrypts the given string applying either the supplied crypter or, in None, the default crypter |
-| `decrypt_bytes(t: bytes, crypter=None, force=False) -> str` | Decrypts the given bytes and returns a string |
-| `encrypt_values(data, crypter=None, force=False, json_skip_keys=None)` | Applyes encryption to a JSON-serializable object |
-| `decrypt_values(data, crypter=None, force=False)` | reverses encrypt_values() |
-
-* force means: proceed even when encryption is disabled in project's settings
-
-## Managment commands
-
-Some management commands are supplied; run with `--help` for detailed informations:
-
-- generate_encryption_key
-- encrypt_str
-- decrypt_str
-- encrypt_all_tables
-- decrypt_all_tables
-
-
-## Getting Started
-
-> $ pip install django-encrypted-json-fields
-
-Add "encrypted_json_fields" to your INSTALLED_APPS setting like this:
-
+```bash
+pip install django-encrypted-fields
 ```
-    INSTALLED_APPS = (
-        ...
-        'encrypted_json_fields',
+
+Ensure the required dependencies are installed:
+
+```bash
+pip install cryptography pycryptodome
+```
+
+---
+
+## Configuration
+
+### Define Encryption Keys
+
+Implementation of this is left up to you. You can define them in your settings.py, or in a more secure way.
+
+```python
+ENCRYPTION_KEYS = {
+    "aes": [b"your-32-byte-long-aes-key-1"],
+    "fernet": [b"your-fernet-key-1", b"your-fernet-key-2"]
+}
+```
+
+_The keys should come from an env variable or a secure source._
+
+You can use **AES** or **Fernet** encryption by initializing the appropriate crypter.
+
+There is a helper function `get_default_crypter` included to get the default crypter from a settings variable. It should be passed the encryption keys.
+
+Add the following to your `settings.py`:
+
+```python
+EJF_SEARCH_FIELD_SALT = "your-salt-for-search-field"  # should be secure, random, and consistent
+EJF_ENABLE_ENCRYPTION = True # defaults to True if not found
+EJF_DEFAULT_ENCRYPTION = "aes" # only required for using get_default_crypter
+```
+
+---
+
+## Usage
+
+### Encrypted Fields
+
+To use encrypted fields, pass a **`crypter`** instance with encryption keys to the field definition. The crypter can also be a **callable** for dynamic configuration.
+
+#### Example Model:
+
+```python
+from django.db import models
+from .fields import (
+    EncryptedCharField,
+    EncryptedTextField,
+    EncryptedJSONField,
+)
+from .encryption import AESEncryption, FernetEncryption
+
+# in the case of existing encrypted data, include the keys for the old encryption method
+keys = {
+    "aes": [b"your-aes-key"],
+    "fernet": [b"your-fernet-key"],
+}
+
+# Static crypter
+aes_crypter = AESEncryption(keys=keys)
+
+class TestModel(models.Model):
+    # Encrypted CharField
+    enc_char_field = EncryptedCharField(
+        max_length=100, crypter=aes_crypter
+    )
+
+    # Encrypted TextField with callable crypter
+    enc_text_field = EncryptedTextField(
+        crypter=lambda: FernetEncryption(keys=keys)
+    )
+
+    # Encrypted JSONField
+    metadata = EncryptedJSONField(
+        crypter=aes_crypter, skip_keys=["public_data"]
     )
 ```
 
-`django-encrypted-json-fields` expects the encryption key to be
-specified using `FIELD_ENCRYPTION_KEY` in your project's `settings.py`
-file. For example, to load it from the local environment:
+---
 
-```
-    import os
+### Encrypted JSONField
 
-    FIELD_ENCRYPTION_KEY = os.environ.get('FIELD_ENCRYPTION_KEY', '')
-```
+The **`EncryptedJSONField`** recursively encrypts the values of keys in the JSON object **except for skipped keys**.
 
-To use an encrypted field in a Django model, use one of the fields from
-the `encrypted_json_fields` module:
+#### Example:
 
-```
-    from encrypted_json_fields.fields import EncryptedCharField
+```python
+keys = {
+    "aes": [b"your-32-byte-aes-key"],
+}
 
-    class EncryptedFieldModel(models.Model):
-        encrypted_char_field = EncryptedCharField(max_length=100)
-```
-
-For fields that require `max_length` to be specified, the `Encrypted`
-variants of those fields will automatically increase the size of the
-database field to hold the encrypted form of the content. For example, a
-3 character CharField will automatically specify a database field size
-of 100 characters when `EncryptedCharField(max_length=3)` is specified.
-
-Due to the nature of the encrypted data, filtering by values contained
-in encrypted fields won't work properly. Sorting is also not supported.
-
-## Running Tests
-
-Does the code actually work?
-
-Running the unit tests from this app:
-
-```
-python manage.py test -v 2
+class TestModel(models.Model):
+    data = EncryptedJSONField(
+        crypter=AESEncryption(keys=keys),
+        skip_keys=["public_key"]
+    )
 ```
 
-or
+- **`skip_keys`**: A list of keys to exclude from encryption.
+- Nested keys are also encrypted recursively.
 
+**Example Data**:
+
+```python
+data = {
+    "key1": "secret value",
+    "key2": {"nested_key": 123},
+    "public_key": "this is public"
+}
 ```
-./runtests.py
+
+**Encrypted Output**:
+
+- `"key1"` → Encrypted
+- `"key2"` → Encrypted recursively
+- `"public_key"` → Skipped (not encrypted)
+
+---
+
+### Encrypted Search Field
+
+The **`EncryptedSearchField`** hashes and salts values for secure exact lookups. It **must be used alongside a companion encrypted field**.
+
+#### Example:
+
+```python
+from .fields import EncryptedCharField, EncryptedSearchField
+
+keys = {
+    "aes": [b"your-32-byte-aes-key"]
+}
+
+class SearchableModel(models.Model):
+    sensitive_data = EncryptedCharField(
+        max_length=255, crypter=AESEncryption(keys=keys)
+    )
+    search_data = EncryptedSearchField(
+        encrypted_field_name="sensitive_data"
+    )
 ```
 
-or
+#### Usage:
 
+```python
+SearchableModel.objects.create(sensitive_data="secret value")
+results = SearchableModel.objects.filter(search_data="secret value")
+print(results)
 ```
-coverage run --source='.' runtests.py
-coverage report
+
+**Notes**:
+
+- Only supports **exact matches**.
+- Case-insensitive comparisons.
+- Use alongside the associated encrypted field.
+
+---
+
+## Crypter Configuration
+
+The `crypter` handles encryption and decryption. You can use **AES** or **Fernet** methods.
+
+### AES Encryption Example:
+
+```python
+from .encryption import AESEncryption
+
+keys = {"aes": [b"your-32-byte-long-aes-key"], "fernet": [b"your-fernet-key"]}
+aes_crypter = AESEncryption(keys=keys)
+
+encrypted = aes_crypter.encrypt_str("Hello World")
+decrypted = aes_crypter.decrypt_str(encrypted)
+print(decrypted)  # Outputs: Hello World
 ```
 
-## Sample project
+### Fernet Encryption Example:
 
-A sample project using this app for demonstration purposes is available here:
+```python
+from .encryption import FernetEncryption
 
-https://github.com/morlandi/test_django_encrypted_json_fields
+keys = {"aes": [b"your-32-byte-long-aes-key"], "fernet": [b"your-fernet-key"]}
+fernet_crypter = FernetEncryption(keys=keys)
 
+encrypted = fernet_crypter.encrypt_str("Hello World")
+decrypted = fernet_crypter.decrypt_str(encrypted)
+print(decrypted)  # Outputs: Hello World
+```
 
-## Credits
+---
 
-- <https://gitlab.com/lansharkconsulting/django/django-encrypted-model-fields> has been shared by Scott Sharkey
-- <https://github.com/foundertherapy/django-cryptographic-fields> has been shared by Dana Spiegel
+## Notes on SearchField
+
+- Requires an `encrypted_field_name` referencing the associated encrypted field.
+- Does not support:
+  - Partial matches
+  - Wildcards
+- Does suppert:
+  - Case-insensitive matches
+
+Always query using the **exact value** of the field.
+
+---
+
+## Limitations
+
+1. Encrypted fields **cannot be used for partial lookups** or ordering.
+2. `EncryptedSearchField`:
+   - Only supports exact matches.
+   - Requires consistent `salt` for hashing.
+3. Ensure encryption keys are **securely stored** and **not hardcoded** in the codebase.
+
+---
+
+## Adding a New Encryption Method Class
+
+To add a new encryption method, create a new class in the `encryption.py` file that inherits from `EncryptionInterface`.
+You can add a matching `EncryptionType` attribute in `constants.py`.
+
+```python
+# Example class for a custom encryption method
+
+class MyCustomEncryption(EncryptionInterface):
+    @property
+    def method_type(self) -> str:
+        """
+        Return a short string that identifies this new method.
+        This value will become part of the prefix for storage/lookup.
+        """
+        return "mycustom"
+
+    def __init__(self, keys, encoder=None, decoder=None, force=True):
+        super().__init__(keys, encoder=encoder, decoder=decoder, force=force)
+        # TODO: Initialize any custom components, e.g. your custom key parsing
+        self.my_keys = keys.get("mycustom", [])
+        # Setup your internal encryption/decryption object if needed
+
+    def encrypt_raw(self, data: bytes) -> bytes:
+        """
+        Perform the **raw** encryption without adding prefixes or performing
+        final transformations like Base64 encoding. Must return bytes.
+        """
+        # TODO: Implement your custom encryption logic
+        # e.g., encrypt using your custom crypto library
+        ciphertext = b"..."
+        return ciphertext
+
+    def decrypt_internal(self, data: bytes) -> bytes:
+        """
+        Decrypt the data that was originally produced by encrypt_raw.
+        The 'data' argument has already had the prefix removed by the base class.
+        """
+        # TODO: Implement your custom decryption logic
+        plaintext = b"..."
+        return plaintext
+```
+
+### Register the new class at the bottom of the `encryption.py` file:
+
+```python
+EncryptionInterface.register_encryption_method("mycustom", MyCustomEncryption)
+```
+
+## TODO
+
+Update commands to work with new code.
+
+---
+
+## Contributing
+
+1. Fork the repository.
+2. Install dependencies.
+3. Submit a pull request with your changes.
+
+---
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+---
+
+## Acknowledgments
+
+This library is inspired by Django's native fields and uses the `cryptography` library for secure encryption and decryption.

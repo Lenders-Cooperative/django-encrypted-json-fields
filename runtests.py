@@ -1,6 +1,10 @@
 #!/usr/bin/env python
 import os
 import sys
+from pathlib import Path
+
+current_dir = Path(__file__).resolve().parent
+sys.path.append(str(current_dir))
 
 # See "Using the Django test runner to test reusable applications":
 # https://docs.djangoproject.com/en/3.1/topics/testing/advanced/#using-the-django-test-runner-to-test-reusable-applications

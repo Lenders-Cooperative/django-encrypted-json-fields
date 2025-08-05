@@ -35,8 +35,6 @@ INSTALLED_APPS = [
     'testapp',
 ]
 
-EJF_ENCRYPTION_KEYS = '6-QgONW6TUl5rt4Xq8u-wBwPcb15sIYS2CN6d69zueM='
-
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -103,3 +101,6 @@ USE_L10N = True
 USE_TZ = True
 
 STATIC_URL = '/static/'
+
+
+EJF_DEFAULT_ENCRYPTION = "fernet"
