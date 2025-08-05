@@ -7,6 +7,7 @@
 ## Features
 
 - **Encrypted Fields**:
+
   - Drop-in replacements for Django's fields: `CharField`, `TextField`, `EmailField`, `BooleanField`, `DateField`, `DateTimeField`, `IntegerField`, `JSONField`, etc.
   - Recursively encrypts values for `EncryptedJSONField`.
   - Encryption methods: AES and Fernet.
@@ -38,7 +39,7 @@ pip install cryptography pycryptodome
 
 ### Define Encryption Keys
 
-Implementation of this is left up to  you. You can define them in your settings.py, or in a more secure way.
+Implementation of this is left up to you. You can define them in your settings.py, or in a more secure way.
 
 ```python
 ENCRYPTION_KEYS = {
@@ -46,6 +47,7 @@ ENCRYPTION_KEYS = {
     "fernet": [b"your-fernet-key-1", b"your-fernet-key-2"]
 }
 ```
+
 _The keys should come from an env variable or a secure source._
 
 You can use **AES** or **Fernet** encryption by initializing the appropriate crypter.
@@ -61,8 +63,6 @@ EJF_DEFAULT_ENCRYPTION = "aes" # only required for using get_default_crypter
 ```
 
 ---
-
-
 
 ## Usage
 
@@ -95,12 +95,12 @@ class TestModel(models.Model):
     enc_char_field = EncryptedCharField(
         max_length=100, crypter=aes_crypter
     )
-    
+
     # Encrypted TextField with callable crypter
     enc_text_field = EncryptedTextField(
         crypter=lambda: FernetEncryption(keys=keys)
     )
-    
+
     # Encrypted JSONField
     metadata = EncryptedJSONField(
         crypter=aes_crypter, skip_keys=["public_data"]
@@ -141,6 +141,7 @@ data = {
 ```
 
 **Encrypted Output**:
+
 - `"key1"` → Encrypted
 - `"key2"` → Encrypted recursively
 - `"public_key"` → Skipped (not encrypted)
@@ -178,6 +179,7 @@ print(results)
 ```
 
 **Notes**:
+
 - Only supports **exact matches**.
 - Case-insensitive comparisons.
 - Use alongside the associated encrypted field.
@@ -222,8 +224,8 @@ print(decrypted)  # Outputs: Hello World
 - Does not support:
   - Partial matches
   - Wildcards
- - Does suppert:
-   - Case-insensitive matches
+- Does suppert:
+  - Case-insensitive matches
 
 Always query using the **exact value** of the field.
 
@@ -241,17 +243,17 @@ Always query using the **exact value** of the field.
 
 ## Adding a New Encryption Method Class
 
-To add a new encryption method, create a new class in the `encryption.py` file that inherits from `EncryptionMethod`.
+To add a new encryption method, create a new class in the `encryption.py` file that inherits from `EncryptionInterface`.
 You can add a matching `EncryptionType` attribute in `constants.py`.
 
 ```python
 # Example class for a custom encryption method
 
-class MyCustomEncryption(EncryptionMethod):
+class MyCustomEncryption(EncryptionInterface):
     @property
     def method_type(self) -> str:
         """
-        Return a short string that identifies this new method. 
+        Return a short string that identifies this new method.
         This value will become part of the prefix for storage/lookup.
         """
         return "mycustom"
@@ -262,9 +264,9 @@ class MyCustomEncryption(EncryptionMethod):
         self.my_keys = keys.get("mycustom", [])
         # Setup your internal encryption/decryption object if needed
 
-    def _encrypt_raw(self, data: bytes) -> bytes:
+    def encrypt_raw(self, data: bytes) -> bytes:
         """
-        Perform the **raw** encryption without adding prefixes or performing 
+        Perform the **raw** encryption without adding prefixes or performing
         final transformations like Base64 encoding. Must return bytes.
         """
         # TODO: Implement your custom encryption logic
@@ -272,9 +274,9 @@ class MyCustomEncryption(EncryptionMethod):
         ciphertext = b"..."
         return ciphertext
 
-    def _decrypt_internal(self, data: bytes) -> bytes:
+    def decrypt_internal(self, data: bytes) -> bytes:
         """
-        Decrypt the data that was originally produced by _encrypt_raw.
+        Decrypt the data that was originally produced by encrypt_raw.
         The 'data' argument has already had the prefix removed by the base class.
         """
         # TODO: Implement your custom decryption logic
@@ -285,10 +287,8 @@ class MyCustomEncryption(EncryptionMethod):
 ### Register the new class at the bottom of the `encryption.py` file:
 
 ```python
-EncryptionMethod.register_encryption_method("mycustom", MyCustomEncryption)
+EncryptionInterface.register_encryption_method("mycustom", MyCustomEncryption)
 ```
-
-
 
 ## TODO
 

@@ -15,7 +15,7 @@ from django.utils import timezone
 from django.utils.functional import cached_property
 from django.utils.text import capfirst
 
-from .encryption import EncryptionMethod, FernetEncryption, AESEncryption
+from .encryption import EncryptionInterface, FernetEncryption, AESEncryption
 
 
 def fetch_raw_field_value(model_instance, fieldname):
