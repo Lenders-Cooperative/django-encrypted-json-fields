@@ -41,6 +41,26 @@ class EncryptionTests(TestCase):
         self.assertEqual(encrypted["key2"]["skip"], "leave_me")
         self.assertNotEqual(encrypted["key2"]["encrypt"], "this_one")
 
+    def test_data_type_preservation(self):
+        test_cases = [
+            ("string", "test string"),
+            ("integer", 123),
+            ("integer_string", "523"),
+            ("float", 3.14),
+            ("float_string", "5.14"),
+            ("boolean_true", True),
+            ("boolean_false", False),
+            ("none", None),
+        ]
+
+        for data_type, value in test_cases:
+            with self.subTest(data_type=data_type):
+                encrypted = self.fernet_encryption.encrypt_values(value)
+                decrypted = self.fernet_encryption.decrypt_values(encrypted)
+
+                self.assertEqual(decrypted, value)
+                self.assertEqual(type(decrypted), type(value))
+
 
 class EncryptionInterfaceTests(TestCase):
     def setUp(self):
