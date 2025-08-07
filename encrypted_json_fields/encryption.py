@@ -1,5 +1,6 @@
 """Encryption module for handling multiple encryption methods."""
 
+from ast import literal_eval
 import base64
 
 from abc import ABC, abstractmethod
@@ -36,8 +37,8 @@ class EncryptionInterface(ABC):
     def __init__(
         self,
         keys: Dict[str, list[bytes]],
-        encoder: JSONEncoder | None = None,
-        decoder: JSONDecoder | None = None,
+        encoder: Type[JSONEncoder] | None = None,
+        decoder: Type[JSONDecoder] | None = None,
         force: bool = True,
     ) -> None:
         """
@@ -54,8 +55,8 @@ class EncryptionInterface(ABC):
 
         Args:
             keys (dict): A dictionary of encryption keys.
-            encoder (JSONEncoder, optional): Encoder for encoding data during encryption.
-            decoder (JSONDecoder, optional): Decoder for decoding data during decryption.
+            encoder (Type[JSONEncoder], optional): Encoder for encoding data during encryption.
+            decoder (Type[JSONDecoder], optional): Decoder for decoding data during decryption.
             force (bool, optional): Whether to enforce encryption even if disabled globally. Defaults to True.
 
         Raises:
@@ -67,8 +68,8 @@ class EncryptionInterface(ABC):
             raise ImproperlyConfigured("Encryption keys must be a dictionary.")
 
         self.keys = keys
-        self.encoder = encoder or JSONEncoder()
-        self.decoder = decoder or JSONDecoder()
+        self.encoder = encoder or JSONEncoder
+        self.decoder = decoder or JSONDecoder
         self.force = force
         if hasattr(settings, "EJF_ENABLE_ENCRYPTION"):
             self.encryption_enabled = settings.EJF_ENABLE_ENCRYPTION or force
@@ -273,7 +274,7 @@ class EncryptionInterface(ABC):
         self,
         data: Union[dict, list, set, tuple, int, float, str, bool],
         json_skip_keys: Union[list, tuple, set, None] = None,
-        encoder: JSONEncoder | None = None,
+        encoder: Type[JSONEncoder] | None = None,
     ) -> Union[dict, list, set, tuple, int, float, str, bool]:
         """
         Recursively encrypts values in a data structure. Used for encrypting JSONField data.
@@ -281,7 +282,7 @@ class EncryptionInterface(ABC):
         Args:
             data (Union[dict, list, set, tuple, int, float, str, bool]): The data to encrypt.
             json_skip_keys (list, optional): Keys to skip during encryption.
-            encoder (JSONEncoder, optional): JSON encoder for complex types.
+            encoder (Type[JSONEncoder], optional): JSON encoder for complex types.
 
         Returns:
             Union[dict, list, set, tuple, int, float, str, bool]: The encrypted data.
@@ -309,20 +310,22 @@ class EncryptionInterface(ABC):
                 raise ValueError(f"Failed to encrypt value: {data} (Error: {e}).") from e
 
         try:
-            encoder_obj = encoder() if encoder else JSONEncoder()
-            encoded_data = encoder_obj.encode(data)
+            encoded_data = (encoder or self.encoder)().encode(data)
             return self.encrypt_str(encoded_data)
         except Exception as e:
             raise ValueError(f"Failed to encode and encrypt value: {data} (Error: {e}).") from e
 
     def decrypt_values(
-        self, data: Union[dict, list, set, tuple, str]
+        self,
+        data: Union[dict, list, set, tuple, str],
+        decoder: Type[JSONDecoder] | None = None,
     ) -> Union[bool, int, float, str, None] | Union[dict, list, set, tuple, str]:
         """
         Recursively decrypts values in a data structure. Used for decrypting JSONField data.
 
         Args:
             data (Union[dict, list, set, tuple, str]): The data to decrypt.
+            decoder (Type[JSONDecoder], optional): JSON decoder for complex types.
 
         Returns:
             Union[bool, int, float, str, None] | Union[dict, list, set, tuple, str]: The decrypted data.
@@ -342,9 +345,9 @@ class EncryptionInterface(ABC):
         decrypted_data = self.decrypt_str(data)
 
         try:
-            return self.infer_type(decrypted_data)
+            return literal_eval(decrypted_data)
         except (ValueError, SyntaxError):
-            return self.decoder.decode(decrypted_data)
+            return (decoder or self.decoder)().decode(decrypted_data)
 
     # --------------
     # Static methods
@@ -364,51 +367,6 @@ class EncryptionInterface(ABC):
             bytes: The byte prefix for the encryption method.
         """
         return f"{method_type.value}:".encode("utf-8")
-
-    @staticmethod
-    def infer_type(value: Union[str, None]) -> Union[bool, int, float, str, None]:
-        """Attempt to infer and convert a decrypted string value to its native Python type.
-
-        This method avoids the use of `ast.literal_eval` for safety and performance reasons.
-        It supports basic type coercion for: None, booleans, integers, and floats.
-
-        Args:
-            value (Union[str, None]): The value to evaluate (typically a string or None).
-
-        Returns:
-            Union[bool, int, float, str, None]: The inferred Python type.
-        """
-        if value is None:
-            return None
-
-        if isinstance(value, str):
-            value = value.strip()  # Remove whitespace
-
-            # Remove wrapping quotes if present
-            if value.startswith(("'", '"')) and value.endswith(("'", '"')) and value[0] == value[-1]:
-                value = value[1:-1]
-
-            # Boolean conversion
-            lower = value.lower()
-            if lower == "true":
-                return True
-            if lower == "false":
-                return False
-
-            # Integer conversion
-            try:
-                return int(value)
-            except ValueError:
-                pass
-
-            # Float conversion
-            try:
-                return float(value)
-            except ValueError:
-                pass
-
-        # Return as-is if no type matches
-        return value
 
 
 class FernetEncryption(EncryptionInterface):
