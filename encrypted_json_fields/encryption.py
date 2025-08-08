@@ -302,7 +302,7 @@ class EncryptionInterface(ABC):
                 for key, value in data.items()
             }
 
-        if isinstance(data, (int, float, bool, str)):
+        if type(data) in (int, float, bool, str):
             try:
                 encoded_data = repr(data)
                 return self.encrypt_str(encoded_data)
