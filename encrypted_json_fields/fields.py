@@ -97,18 +97,13 @@ class EncryptedMixin(object):
         return "TextField"
 
     def deconstruct(self):
-        """
-        Ensure crypter is excluded during migrations to prevent serialization issues.
-        """
         name, path, args, kwargs = super().deconstruct()
-        kwargs["crypter"] = self.crypter
-        return name, path, args, kwargs
 
-    def validate_max_length(self, value):
-        if value is not None and hasattr(self, "max_length") and self.max_length:
-            encrypted_value = self.crypter.encrypt_str(str(value))
-            if len(encrypted_value) > self.max_length:
-                raise ValidationError(f"Encrypted value would exceed max_length of {self.max_length}")
+        kwargs["crypter"] = self.crypter  # Preserve the crypter reference for generating default values
+        if "max_length" in kwargs:
+            del kwargs["max_length"]  # Can't truly control max_length on encrypted fields
+
+        return name, path, args, kwargs
 
 
 class EncryptedCharField(EncryptedMixin, django.db.models.CharField):
