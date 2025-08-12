@@ -101,7 +101,7 @@ class EncryptedMixin(object):
         Ensure crypter is excluded during migrations to prevent serialization issues.
         """
         name, path, args, kwargs = super().deconstruct()
-        kwargs.pop("crypter", None)  # Remove the crypter reference for migration safety
+        kwargs["crypter"] = self.crypter
         return name, path, args, kwargs
 
     def validate_max_length(self, value):
