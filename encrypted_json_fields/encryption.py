@@ -7,7 +7,6 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from json import JSONEncoder, JSONDecoder
 from typing import Dict, Type, Union
-from constance import config
 from cryptography.fernet import Fernet, MultiFernet, InvalidToken
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
@@ -73,8 +72,8 @@ class EncryptionInterface(ABC):
         self.force = force
         if hasattr(settings, "EJF_ENABLE_ENCRYPTION"):
             self.encryption_enabled = settings.EJF_ENABLE_ENCRYPTION or force
-        elif hasattr(config, "SECURITY_EJF_ENABLE_ENCRYPTION"):
-            self.encryption_enabled = config.SECURITY_EJF_ENABLE_ENCRYPTION or force
+        elif hasattr(settings, "SECURITY_SETTINGS"):
+            self.encryption_enabled = settings.SECURITY_SETTINGS.get("EJF_ENABLE_ENCRYPTION") or force
         else:
             self.encryption_enabled = True  # Default to True if no setting is defined
 
