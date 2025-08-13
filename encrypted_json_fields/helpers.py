@@ -19,19 +19,15 @@ def get_default_crypter(keys: dict):
         EncryptionInterface: Instance of the selected encryption class.
     """
     # pylint: disable=import-outside-toplevel
-    from constance import config
     from django.conf import settings
 
     from .encryption import EncryptionInterface, EncryptionTypes
 
     # pylint:enable=import-outside-toplevel
 
-    # Retrieve the default encryption method from Django settings or Constance config
-    default_encryption = None
-    if hasattr(settings, "EJF_DEFAULT_ENCRYPTION"):
-        default_encryption = settings.EJF_DEFAULT_ENCRYPTION
-    elif hasattr(config, "SECURITY_EJF_DEFAULT_ENCRYPTION"):
-        default_encryption = config.SECURITY_EJF_DEFAULT_ENCRYPTION
+    # Retrieve the default encryption method from Django settings
+    enc_key = "EJF_DEFAULT_ENCRYPTION"
+    default_encryption = getattr(settings, enc_key, None) or getattr(settings, "SECURITY_SETTINGS", {}).get(enc_key)
 
     # Raise an error if neither setting is defined
     if not default_encryption:
