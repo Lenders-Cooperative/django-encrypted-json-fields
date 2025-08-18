@@ -1,7 +1,5 @@
 """Helpers for managing encryption methods in Django Encrypted Fields."""
 
-from typing import Optional
-
 
 def get_default_crypter(keys: dict):
     """
@@ -57,7 +55,7 @@ def get_default_crypter(keys: dict):
     raise ValueError(f"Encryption method '{default_encryption}' is not a registered encryption class.")
 
 
-def get_dummy_crypter(keys: dict, encryption_method: Optional[str] = None):
+def get_dummy_crypter(keys: dict, encryption_method: str | None = None):
     """Return a crypter instance for use during migrations.
 
     This is intended for generating default values for encrypted fields when migrations fail due to backward compatibility issues.
