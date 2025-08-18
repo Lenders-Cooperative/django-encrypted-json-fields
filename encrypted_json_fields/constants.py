@@ -9,6 +9,7 @@ class EncryptionTypes(Enum):
     class, you can add a matching attribute here.
     """
 
+    NONE = "none"
     AES_CBC = "aes"
     AES_GCM = "aes_gcm"
     FERNET = "fernet"

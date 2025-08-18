@@ -2,8 +2,6 @@ import hashlib
 import itertools
 import string
 
-import django.db
-import django.db.models
 from django.conf import settings
 from django.core import validators
 from django.core.exceptions import ImproperlyConfigured, ValidationError
@@ -11,6 +9,8 @@ from django.db import connection, models
 from django.utils import timezone
 from django.utils.functional import cached_property
 from django.utils.text import capfirst
+
+from encrypted_json_fields.encryption import NoEncryption
 
 
 def fetch_raw_field_value(model_instance, fieldname):
@@ -57,7 +57,7 @@ class EncryptedMixin(object):
     @property
     def crypter(self):
         if not self._crypter:
-            raise ValueError("Crypter must be set before encryption or decryption.")
+            return NoEncryption(keys={"aes": [], "fernet": [], "aes_gcm": []})
         if callable(self._crypter):
             return self._crypter()
         return self._crypter
@@ -99,14 +99,14 @@ class EncryptedMixin(object):
     def deconstruct(self):
         name, path, args, kwargs = super().deconstruct()
 
-        kwargs["crypter"] = self._crypter  # Preserve the crypter reference for generating default values
-        if "max_length" in kwargs:
-            del kwargs["max_length"]  # Can't truly control max_length on encrypted fields
+        for kwarg in ("crypter", "max_length"):  # Remove the crypter ref and max length for migration safety
+            if kwarg in kwargs:
+                del kwargs[kwarg]
 
         return name, path, args, kwargs
 
 
-class EncryptedCharField(EncryptedMixin, django.db.models.CharField):
+class EncryptedCharField(EncryptedMixin, models.CharField):
 
     def clean(self, value, model_instance):
         value = super().clean(value, model_instance)
@@ -115,11 +115,11 @@ class EncryptedCharField(EncryptedMixin, django.db.models.CharField):
         return value
 
 
-class EncryptedTextField(EncryptedMixin, django.db.models.TextField):
+class EncryptedTextField(EncryptedMixin, models.TextField):
     pass
 
 
-class EncryptedDateField(EncryptedMixin, django.db.models.DateField):
+class EncryptedDateField(EncryptedMixin, models.DateField):
     def pre_save(self, model_instance, add):
         if self.auto_now or (add and self.auto_now_add):
             from django.utils import timezone
@@ -137,7 +137,7 @@ class EncryptedDateField(EncryptedMixin, django.db.models.DateField):
         return super().get_db_prep_value(value, connection, prepared)
 
 
-class EncryptedDateTimeField(EncryptedMixin, django.db.models.DateTimeField):
+class EncryptedDateTimeField(EncryptedMixin, models.DateTimeField):
     # credit to Oleg Pesok...
     def to_python(self, value):
         value = super(EncryptedDateTimeField, self).to_python(value)
@@ -149,11 +149,11 @@ class EncryptedDateTimeField(EncryptedMixin, django.db.models.DateTimeField):
         return value
 
 
-class EncryptedEmailField(EncryptedMixin, django.db.models.EmailField):
+class EncryptedEmailField(EncryptedMixin, models.EmailField):
     pass
 
 
-class EncryptedBooleanField(EncryptedMixin, django.db.models.BooleanField):
+class EncryptedBooleanField(EncryptedMixin, models.BooleanField):
     def get_db_prep_save(self, value, connection):
         if value is None:
             return value
@@ -198,7 +198,7 @@ class EncryptedNumberMixin(EncryptedMixin):
         # they're based on values retrieved from `connection`.
         range_validators = []
         internal_type = self.__class__.__name__[9:]
-        min_value, max_value = django.db.connection.ops.integer_field_range(internal_type)
+        min_value, max_value = connection.ops.integer_field_range(internal_type)
         if min_value is not None:
             range_validators.append(validators.MinValueValidator(min_value))
         if max_value is not None:
@@ -206,7 +206,7 @@ class EncryptedNumberMixin(EncryptedMixin):
         return list(itertools.chain(self.default_validators, self._validators, range_validators))
 
 
-class EncryptedIntegerField(EncryptedNumberMixin, django.db.models.IntegerField):
+class EncryptedIntegerField(EncryptedNumberMixin, models.IntegerField):
     description = (
         "An IntegerField that is encrypted before " "inserting into a database using the python cryptography " "library"
     )
@@ -219,14 +219,14 @@ class EncryptedIntegerField(EncryptedNumberMixin, django.db.models.IntegerField)
         super().check_value(value)
 
 
-class EncryptedPositiveIntegerField(EncryptedIntegerField, django.db.models.PositiveIntegerField):
+class EncryptedPositiveIntegerField(EncryptedIntegerField, models.PositiveIntegerField):
     def check_value(self, value):
         if value is not None and value < 0:
             raise ValidationError("Positive integer field cannot be negative.")
         super().check_value(value)
 
 
-class EncryptedSmallIntegerField(EncryptedNumberMixin, django.db.models.SmallIntegerField):
+class EncryptedSmallIntegerField(EncryptedNumberMixin, models.SmallIntegerField):
     def check_value(self, value):
         if value is not None:
             min_value, max_value = -32768, 32767
@@ -235,14 +235,14 @@ class EncryptedSmallIntegerField(EncryptedNumberMixin, django.db.models.SmallInt
         super().check_value(value)
 
 
-class EncryptedPositiveSmallIntegerField(EncryptedSmallIntegerField, django.db.models.PositiveSmallIntegerField):
+class EncryptedPositiveSmallIntegerField(EncryptedSmallIntegerField, models.PositiveSmallIntegerField):
     def check_value(self, value):
         if value is not None and value < 0:
             raise ValidationError("Positive integer field cannot be negative.")
         super().check_value(value)
 
 
-class EncryptedBigIntegerField(EncryptedNumberMixin, django.db.models.BigIntegerField):
+class EncryptedBigIntegerField(EncryptedNumberMixin, models.BigIntegerField):
     def check_value(self, value):
         if value is not None:
             min_value, max_value = -9223372036854775808, 9223372036854775807
@@ -255,7 +255,7 @@ class EncryptedBigIntegerField(EncryptedNumberMixin, django.db.models.BigInteger
 # Encryption for JSONField
 
 
-class EncryptedJSONField(EncryptedMixin, django.db.models.JSONField):
+class EncryptedJSONField(EncryptedMixin, models.JSONField):
     def __init__(self, crypter=None, *args, **kwargs):
         self.skip_keys = kwargs.pop("skip_keys", [])
         if not isinstance(self.skip_keys, (list, tuple)):
@@ -280,7 +280,7 @@ class EncryptedJSONField(EncryptedMixin, django.db.models.JSONField):
         encrypted_value = crypter.encrypt_values(value, json_skip_keys=self.skip_keys, encoder=self.encoder)
 
         # Call JSONField's get_db_prep_save directly to avoid EncryptedMixin
-        return super(django.db.models.JSONField, self).get_db_prep_save(encrypted_value, connection)
+        return super(models.JSONField, self).get_db_prep_save(encrypted_value, connection)
 
     def from_db_value(self, value, expression, connection):
         """
@@ -290,7 +290,7 @@ class EncryptedJSONField(EncryptedMixin, django.db.models.JSONField):
             return value
 
         # Let JSONField handle the JSON deserialization
-        value = django.db.models.JSONField.from_db_value(self, value, expression, connection)
+        value = models.JSONField.from_db_value(self, value, expression, connection)
 
         crypter = self.crypter
         if callable(crypter):
@@ -302,7 +302,7 @@ class EncryptedJSONField(EncryptedMixin, django.db.models.JSONField):
         """
         Override to prevent EncryptedMixin's decryption
         """
-        return super(django.db.models.JSONField, self).to_python(value)
+        return super(models.JSONField, self).to_python(value)
 
     def validate_max_length(self, value):
         """
