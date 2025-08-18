@@ -1,5 +1,7 @@
 """Helpers for managing encryption methods in Django Encrypted Fields."""
 
+from typing import Optional
+
 
 def get_default_crypter(keys: dict):
     """
@@ -53,3 +55,33 @@ def get_default_crypter(keys: dict):
 
     # No matching encryption class found
     raise ValueError(f"Encryption method '{default_encryption}' is not a registered encryption class.")
+
+
+def get_dummy_crypter(keys: dict, encryption_method: Optional[str] = None):
+    """Return a crypter instance for use during migrations.
+
+    This is intended for generating default values for encrypted fields when migrations fail due to backward compatibility issues.
+    Prefer using `get_default_crypter` in all other cases.
+
+    Args:
+        keys (dict): Encryption keys to initialize the crypter.
+        encryption_method (Optional[str]): The encryption method to use. Defaults to 'fernet' if not specified.
+
+    Returns:
+        EncryptionInterface: An instance of the selected encryption class.
+    """
+    # pylint: disable=import-outside-toplevel
+    from .encryption import EncryptionInterface, EncryptionTypes
+
+    # pylint:enable=import-outside-toplevel
+
+    # Normalize the encryption method name
+    encryption_method = encryption_method.lower() if encryption_method else EncryptionTypes.FERNET.value
+
+    # Search for a registered encryption class matching the method name
+    for enc_type, enc_class in EncryptionInterface.get_encryption_registry().items():
+        if enc_type == encryption_method:
+            return enc_class(keys)
+
+    # No matching encryption class found
+    raise ValueError(f"Encryption method '{encryption_method}' is not a registered encryption class.")
