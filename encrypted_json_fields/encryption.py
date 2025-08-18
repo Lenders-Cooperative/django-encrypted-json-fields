@@ -368,6 +368,49 @@ class EncryptionInterface(ABC):
         return f"{method_type.value}:".encode("utf-8")
 
 
+class NoEncryption(EncryptionInterface):
+    """
+    Implements no encryption (plaintext) storage.
+
+    This is useful for testing, migrations or when encryption is not needed.
+    """
+
+    method_type = EncryptionTypes.NONE
+
+    def encrypt_raw(self, data: bytes) -> bytes:
+        """Encrypt data without any encryption.
+
+        Args:
+            data (bytes): Data to encrypt.
+
+        Returns:
+            bytes: Unmodified data.
+        """
+        return data
+
+    def final_encrypt(self, data: bytes) -> bytes:
+        """Encrypt data and add a prefix.
+
+        Args:
+            data (bytes): Data to encrypt.
+
+        Returns:
+            bytes: Prefixed unencrypted data.
+        """
+        return data
+
+    def decrypt_internal(self, data: bytes) -> bytes:
+        """Decrypt data without any encryption.
+
+        Args:
+            data (bytes): Data to decrypt.
+
+        Returns:
+            bytes: Unmodified data.
+        """
+        return data
+
+
 class FernetEncryption(EncryptionInterface):
     """
     Implements Fernet symmetric encryption protocol.
