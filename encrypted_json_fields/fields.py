@@ -99,9 +99,9 @@ class EncryptedMixin(object):
     def deconstruct(self):
         name, path, args, kwargs = super().deconstruct()
 
-        kwargs["crypter"] = self._crypter  # Preserve the crypter reference for generating default values
-        if "max_length" in kwargs:
-            del kwargs["max_length"]  # Can't truly control max_length on encrypted fields
+        for kwarg in ("crypter", "max_length"):  # Remove the crypter ref and max length for migration safety
+            if kwarg in kwargs:
+                del kwargs[kwarg]
 
         return name, path, args, kwargs
 
