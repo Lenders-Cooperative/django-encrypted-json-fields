@@ -5,12 +5,16 @@ from cryptography.fernet import Fernet, InvalidToken
 from django.core.exceptions import ImproperlyConfigured
 from django.test import TestCase, override_settings
 from encrypted_json_fields.constants import EncryptionTypes
-from encrypted_json_fields.encryption import EncryptionInterface, FernetEncryption
+from encrypted_json_fields.encryption import EncryptionInterface, FernetEncryption, AESCBCEncryption
 
 
 class EncryptionTests(TestCase):
     def setUp(self):
-        self.fernet_encryption = FernetEncryption({EncryptionTypes.FERNET.value: [os.urandom(32)]})
+        self.fernet_keys = [os.urandom(32)]  # Valid Fernet keys
+        self.aes_keys = [os.urandom(32)]
+        self.keys = {"aes": self.aes_keys, "fernet": self.fernet_keys}
+        self.fernet_encryption = FernetEncryption(self.keys)
+        self.aes_encryption = AESCBCEncryption(self.keys)
 
     def test_encrypt_values_recursively(self):
         nested_data = {
