@@ -3,7 +3,7 @@ import os
 
 from cryptography.fernet import Fernet, InvalidToken
 from django.core.exceptions import ImproperlyConfigured
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from encrypted_json_fields.constants import EncryptionTypes
 from encrypted_json_fields.encryption import EncryptionInterface, FernetEncryption
 
@@ -60,6 +60,18 @@ class EncryptionTests(TestCase):
 
                 self.assertEqual(decrypted, value)
                 self.assertEqual(type(decrypted), type(value))
+
+    def test_fernet_prefix_respected(self):
+        cases = ((False, "no_prefix"), (True, "with_prefix"))
+        for enabled, name in cases:
+            with self.subTest(case=name, prefix_enabled=enabled):
+                with override_settings(SECURITY_SETTINGS={"PREFIX_FERNET_ALGO": enabled}):
+                    data = b"test data"
+                    encrypted = self.fernet_encryption.encrypt(data)
+                    if enabled:
+                        self.assertTrue(encrypted.startswith(b"fernet:"))
+                    else:
+                        self.assertFalse(encrypted.startswith(b"fernet:"))
 
 
 class EncryptionInterfaceTests(TestCase):

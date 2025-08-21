@@ -490,6 +490,7 @@ class FernetEncryption(EncryptionInterface):
     def final_encrypt(self, data: bytes) -> bytes:
         """
         Add Fernet prefix to encrypted data.
+        Respects SECURITY_SETTINGS.PREFIX_FERNET_ALGO to decide whether to add the prefix.
 
         Args:
             data (bytes): Raw data to encrypt.
@@ -500,8 +501,9 @@ class FernetEncryption(EncryptionInterface):
         Notes:
             Prefix allows identification of encryption method in multi-method systems.
         """
+        add_prefix = getattr(settings, "SECURITY_SETTINGS", {}).get("PREFIX_FERNET_ALGO", True)
         raw_encrypted = self.encrypt_raw(data)
-        return self.prefix + raw_encrypted
+        return self.prefix + raw_encrypted if add_prefix else raw_encrypted
 
 
 class AESEncryption(EncryptionInterface):
