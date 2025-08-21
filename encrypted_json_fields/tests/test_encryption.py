@@ -4,7 +4,6 @@ import os
 from cryptography.fernet import Fernet, InvalidToken
 from django.core.exceptions import ImproperlyConfigured
 from django.test import TestCase, override_settings
-
 from encrypted_json_fields.constants import EncryptionTypes
 from encrypted_json_fields.encryption import EncryptionInterface, FernetEncryption
 
