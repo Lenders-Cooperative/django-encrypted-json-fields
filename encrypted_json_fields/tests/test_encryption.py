@@ -65,7 +65,7 @@ class EncryptionTests(TestCase):
         cases = ((False, "no_prefix"), (True, "with_prefix"))
         for enabled, name in cases:
             with self.subTest(case=name, prefix_enabled=enabled):
-                with override_settings(SECURITY_SETTINGS={"PREFIX_FERNET_ALGO": enabled}):
+                with override_settings(PREFIX_FERNET_ALGO_POST_ENCRYPTION=enabled):
                     data = b"test data"
                     encrypted = self.fernet_encryption.encrypt(data)
                     if enabled:
